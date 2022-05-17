@@ -127,6 +127,7 @@ static void *ktp_worker(void *data)
 	pthread_exit(0);
 }
 
+// n_steps = 3, func = worker_pipeline, n_threads = (at most) 3
 void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps)
 {
 	ktp_t aux;
