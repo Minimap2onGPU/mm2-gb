@@ -419,7 +419,7 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 	double t = 0.0;
 	mm_tbuf_t *b = s->buf[tid];
 	assert(s->n_seg[i] <= MM_MAX_SEG);
-	if (mm_dbg_flag & MM_DBG_PRINT_QNAME) {
+	if (mm_dbg_flag & MM_DBG_PRINT_QNAME) { //DEBUG:
 		fprintf(stderr, "QR\t%s\t%d\t%d\n", s->seq[off].name, tid, s->seq[off].l_seq);
 		t = realtime();
 	}
@@ -653,7 +653,7 @@ int mm_map_file_frag(const mm_idx_t *idx, int n_segs, const char **fn, const mm_
 	if (opt->split_prefix)
 		pl.fp_split = mm_split_init(opt->split_prefix, idx);
 	pl_threads = n_threads == 1? 1 : (opt->flag&MM_F_2_IO_THREADS)? 3 : 2;
-	kt_pipeline(pl_threads, worker_pipeline, &pl, 3);
+	kt_pipeline(pl_threads, worker_pipeline, &pl, 3); /* make workload, pipeline */
 
 	free(pl.str.s);
 	if (pl.fp_split) fclose(pl.fp_split);
