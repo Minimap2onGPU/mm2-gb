@@ -34,7 +34,7 @@ ifneq ($(tsan),)
 	LIBS+=-fsanitize=thread
 endif
 
-.PHONY:all extra clean depend
+.PHONY:all extra clean depend profile
 .SUFFIXES:.c .o
 
 .c.o:
@@ -43,6 +43,10 @@ endif
 all:$(PROG)
 
 extra:all $(PROG_EXTRA)
+
+profile:CFLAGS += -pg -g3
+profile:all
+	perf record --call-graph=dwarf -e cycles:u time ./minimap2 -a test/MT-human.fa test/MT-orang.fa > test.sam
 
 minimap2:main.o libminimap2.a
 		$(CC) $(CFLAGS) main.o -o $@ -L. -lminimap2 $(LIBS)
