@@ -84,3 +84,56 @@
 [M::main] Version: 2.24-r1122
 [M::main] CMD: ./minimap2 -a data/hg38.fa data/ONT/150k.fa
 [M::main] Real time: 13693.307 sec; CPU: 40846.337 sec; Peak RSS: 12.217 GB
+
+
+[M::mm_idx_gen::40.755*1.55] collected minimizers
+[M::mm_idx_gen::50.247*1.82] sorted minimizers
+[M::main::50.247*1.82] loaded/built the index for 195 target sequence(s)
+[M::mm_mapopt_update::51.397*1.81] mid_occ = 694
+[M::mm_idx_stat] kmer size: 15; skip: 10; is_hpc: 0; #seq: 195
+[M::mm_idx_stat::52.062*1.80] distinct minimizers: 100167746 (38.80% are singletons); average occurrences: 5.519; average spacing: 5.607; total length: 3099922541
+[M::worker_pipeline::370.803*2.82] mapped 4200 sequences
+[M::worker_pipeline::673.349*2.90] mapped 4208 sequences
+[M::worker_pipeline::978.315*2.93] mapped 4222 sequences
+[M::worker_pipeline::1352.544*2.95] mapped 4211 sequences
+[M::worker_pipeline::1692.141*2.96] mapped 4220 sequences
+[M::worker_pipeline::2064.188*2.96] mapped 4219 sequences
+[M::worker_pipeline::2398.173*2.96] mapped 4211 sequences
+[M::worker_pipeline::2728.559*2.97] mapped 4200 sequences
+[M::worker_pipeline::3046.428*2.97] mapped 4225 sequences
+[M::worker_pipeline::3380.496*2.97] mapped 4236 sequences
+[M::worker_pipeline::3702.501*2.97] mapped 4213 sequences
+[M::worker_pipeline::4093.209*2.97] mapped 4213 sequences
+[M::worker_pipeline::4412.668*2.98] mapped 4209 sequences
+[M::worker_pipeline::4789.886*2.98] mapped 4232 sequences
+[M::worker_pipeline::5178.209*2.98] mapped 4213 sequences
+[M::worker_pipeline::5580.505*2.98] mapped 4235 sequences
+[M::worker_pipeline::5944.109*2.98] mapped 4211 sequences
+[M::worker_pipeline::6319.825*2.98] mapped 4222 sequences
+[M::worker_pipeline::6675.215*2.98] mapped 4231 sequences
+[M::worker_pipeline::7030.800*2.98] mapped 4216 sequences
+[M::worker_pipeline::7471.666*2.98] mapped 4229 sequences
+[M::worker_pipeline::7899.794*2.98] mapped 4232 sequences
+[M::worker_pipeline::8282.644*2.98] mapped 4233 sequences
+[M::worker_pipeline::8683.440*2.98] mapped 4223 sequences
+[M::worker_pipeline::8990.802*2.98] mapped 4262 sequences
+[M::worker_pipeline::9295.482*2.98] mapped 4302 sequences
+[M::worker_pipeline::9556.592*2.98] mapped 4264 sequences
+[M::worker_pipeline::9801.710*2.98] mapped 4244 sequences
+[M::worker_pipeline::10044.614*2.98] mapped 4226 sequences
+[M::worker_pipeline::10298.371*2.98] mapped 4218 sequences
+[M::worker_pipeline::10558.434*2.98] mapped 4229 sequences
+[M::worker_pipeline::10759.619*2.98] mapped 4263 sequences
+[M::worker_pipeline::10984.379*2.98] mapped 4248 sequences
+[M::worker_pipeline::11298.636*2.98] mapped 4200 sequences
+[M::worker_pipeline::11581.079*2.98] mapped 4200 sequences
+[M::worker_pipeline::11881.789*2.98] mapped 4207 sequences
+[M::worker_pipeline::12192.599*2.98] mapped 4211 sequences
+[M::worker_pipeline::12491.043*2.98] mapped 4221 sequences
+[M::worker_pipeline::12830.328*2.98] mapped 4211 sequences
+[M::worker_pipeline::13127.867*2.98] mapped 4211 sequences
+[M::worker_pipeline::13425.052*2.98] mapped 4210 sequences
+[M::worker_pipeline::13693.112*2.98] mapped 3628 sequences
+[M::main] Version: 2.24-r1122
+[M::main] CMD: ./minimap2 -a data/hg38.fa data/ONT/150k.fa
+[M::main] Real time: 13693.307 sec; CPU: 40846.337 sec; Peak RSS: 12.217 GB
