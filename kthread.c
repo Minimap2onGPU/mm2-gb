@@ -53,8 +53,10 @@ static void *ktf_worker(void *data)
 
 void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n)
 {
-	if (n_threads > 1) {
-		int i;
+	//DEBUG: force to run on only one thread
+    // n_threads = 1;
+    if (n_threads > 1) {
+        int i;
 		kt_for_t t;
 		pthread_t *tid;
 		t.func = func, t.data = data, t.n_threads = n_threads, t.n = n;
@@ -65,10 +67,10 @@ void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n)
 		for (i = 0; i < n_threads; ++i) pthread_create(&tid[i], 0, ktf_worker, &t.w[i]);
 		for (i = 0; i < n_threads; ++i) pthread_join(tid[i], 0);
 		free(tid); free(t.w);
-	} else {
-		long j;
+    } else {
+        long j;
 		for (j = 0; j < n; ++j) func(data, j, 0);
-	}
+    }
 }
 
 /*****************
