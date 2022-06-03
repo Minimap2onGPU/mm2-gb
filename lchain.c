@@ -40,7 +40,7 @@ uint64_t *mg_chain_backtrack(void *km, int64_t n, const int32_t *f, const int64_
 		if (f[i] >= min_sc) z[k].x = f[i], z[k++].y = i;
 	radix_sort_128x(z, z + n_z);
 
-	memset(t, 0, n * 4);
+	memset(t, 0, n * 4); // NOTE: meaning t is not used as an input
 	for (k = n_z - 1, n_v = n_u = 0; k >= 0; --k) { // precompute n_u
 		if (t[z[k].y] == 0) {
 			int64_t n_v0 = n_v, end_i;
@@ -62,7 +62,7 @@ uint64_t *mg_chain_backtrack(void *km, int64_t n, const int32_t *f, const int64_
 			int32_t sc;
 			end_i = mg_chain_bk_end(max_drop, z, f, p, t, k);
 			for (i = z[k].y; i != end_i; i = p[i])
-				v[n_v++] = i, t[i] = 1;
+				v[n_v++] = i, t[i] = 1; // NOTE: v is noly written into, never read from
 			sc = i < 0? z[k].x : (int32_t)z[k].x - f[i];
 			if (sc >= min_sc && n_v > n_v0 && n_v - n_v0 >= min_cnt)
 				u[n_u++] = (uint64_t)sc << 32 | (n_v - n_v0);
@@ -138,21 +138,30 @@ static inline int32_t comput_sc(const mm128_t *ai, const mm128_t *aj, int32_t ma
 }
 
 /* Input:
- *   a[].x: tid<<33 | rev<<32 | tpos
- *   a[].y: flags<<40 | q_span<<32 | q_pos
+ *   a[].x: tid<<33 | rev<<32 | tpos: reference position
+ *   a[].y: flags<<40 | q_span<<32 | q_pos: query position
  * Output:
  *   n_u: #chains
  *   u[]: score<<32 | #anchors (sum of lower 32 bits of u[] is the returned length of a[])
  * input a[] is deallocated on return
  */
-mm128_t *mg_lchain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter, int min_cnt, int min_sc, float chn_pen_gap, float chn_pen_skip,
-					  int is_cdna, int n_seg, int64_t n, mm128_t *a, int *n_u_, uint64_t **_u, void *km)
-{ // TODO: make sure this works when n has more than 32 bits
-	int32_t *f, *t, *v, n_u, n_v, mmax_f = 0, max_drop = bw;
-	int64_t *p, i, j, max_ii, st = 0, n_iter = 0;
+#include <stdio.h>
+FILE *pred_range_fptr = NULL;
+mm128_t *mg_lchain_dp(
+    int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter,
+    int min_cnt, int min_sc, float chn_pen_gap, float chn_pen_skip, int is_cdna,
+    int n_seg, int64_t n,  // NOTE: n is number of anchors
+    mm128_t *a,            // NOTE: a is ptr to anchors.
+    int *n_u_, uint64_t **_u,
+    void *km) {  // TODO: make sure this works when n has more than 32 bits
+    int32_t *f, *t, *v, n_u, n_v, mmax_f = 0, max_drop = bw;
+	int64_t *p, i, j, max_ii; // NOTE: max_ii: the anchor idx that holds max score on the chain
+	int64_t st = 0, n_iter = 0; // NOTE: n_iter: scores calculated
 	uint64_t *u;
 
-	if (_u) *_u = 0, *n_u_ = 0;
+    if (!NULL) pred_range_fptr = fopen("./Log/prange.csv", "w+");
+
+    if (_u) *_u = 0, *n_u_ = 0;
 	if (n == 0 || a == 0) {
 		kfree(km, a);
 		return 0;
@@ -160,33 +169,41 @@ mm128_t *mg_lchain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int 
 	if (max_dist_x < bw) max_dist_x = bw;
 	if (max_dist_y < bw && !is_cdna) max_dist_y = bw;
 	if (is_cdna) max_drop = INT32_MAX;
-	KMALLOC(km, p, n);
-	KMALLOC(km, f, n);
-	KMALLOC(km, v, n);
-	KCALLOC(km, t, n);
+	KMALLOC(km, p, n); // NOTE: previous anchor
+	KMALLOC(km, f, n); // NOTE: score
+	KMALLOC(km, v, n); // NOTE: max score upto i
+	KCALLOC(km, t, n); // NOTE: used to track if it is a predecessor of an anchor already chained to
 
 	// fill the score and backtrack arrays
-	for (i = 0, max_ii = -1; i < n; ++i) {
+	for (i = 0, max_ii = -1; i < n; ++i) { 
+		//NOTE: iterate through all the anchors. i: current anchor idx
 		int64_t max_j = -1, end_j;
-		int32_t max_f = a[i].y>>32&0xff, n_skip = 0;
-		while (st < i && (a[i].x>>32 != a[st].x>>32 || a[i].x > a[st].x + max_dist_x)) ++st;
+		int32_t max_f = a[i].y>>32&0xff, n_skip = 0; // NOTE: max_f: q_span(w), serve as the minimum for chaining score
+        while (st < i && 
+				(a[i].x >> 32 != a[st].x >> 32 // NOTE: ???
+				|| a[i].x > a[st].x + max_dist_x))
+            //NOTE: st: predecessor range start idx. 
+			++st;
 		if (i - st > max_iter) st = i - max_iter;
-		for (j = i - 1; j >= st; --j) {
-			int32_t sc;
+        fprintf(pred_range_fptr, "%d,", i - st);
+        for (j = i - 1; j >= st; --j) {  // NOTE: j: predecessor idx
+            int32_t sc; 
 			sc = comput_sc(&a[i], &a[j], max_dist_x, max_dist_y, bw, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
 			++n_iter;
 			if (sc == INT32_MIN) continue;
-			sc += f[j];
-			if (sc > max_f) {
-				max_f = sc, max_j = j;
+            sc += f[j];  // NOTE: score
+            if (sc > max_f) {
+				max_f = sc, max_j = j; // NOTE: update max score
 				if (n_skip > 0) --n_skip;
-			} else if (t[j] == (int32_t)i) {
+			} else if (t[j] == (int32_t)i) { // NOTE: go to next anchor if  we continue comming across predecessor of anchors we have already tried to chain to. 
 				if (++n_skip > max_skip)
 					break;
 			}
 			if (p[j] >= 0) t[p[j]] = i;
-		}
-		end_j = j;
+        }
+        end_j = j;
+
+		// NOTE: update max_ii (idx of anchor that holds peak score)
 		if (max_ii < 0 || a[i].x - a[max_ii].x > (int64_t)max_dist_x) {
 			int32_t max = INT32_MIN;
 			max_ii = -1;
@@ -206,6 +223,7 @@ mm128_t *mg_lchain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int 
 		if (mmax_f < max_f) mmax_f = max_f;
 	}
 
+	// NOTE: t is not use, v is updated, f & p are inputs, n_u & n_v are outputs.
 	u = mg_chain_backtrack(km, n, f, p, v, t, min_cnt, min_sc, max_drop, &n_u, &n_v);
 	*n_u_ = n_u, *_u = u; // NB: note that u[] may not be sorted by score here
 	kfree(km, p); kfree(km, f); kfree(km, t);

@@ -4,7 +4,7 @@ Last output:
 [M::mm_idx_stat::54.802*1.72] distinct minimizers: 100167746 (38.80% are singletons); average occurrences: 5.519; average spacing: 5.607; total length: 3099922541
 ```
 
-## 2. Alinger
+## 2. Aligner
 call stack to main workload
 ```
 [M::main.c::428/433](mm_map_file->)mm_map_file_frag
