@@ -9,3 +9,4 @@ mappy.c
 data/**
 .vscode/**
 test.sam
+Log/**
