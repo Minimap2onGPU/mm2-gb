@@ -125,6 +125,10 @@ static inline float mg_log2(float x) // NB: this doesn't work when x<2
 	return log_2;
 }
 
+// CUDA functions
+void range_selection();
+void forward_dp();
+
 #ifdef __cplusplus
 }
 #endif

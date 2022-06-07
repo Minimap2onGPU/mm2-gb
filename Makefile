@@ -5,7 +5,7 @@ CPPFLAGS=	-DHAVE_KALLOC
 INCLUDES=
 OBJS=		kthread.o kalloc.o misc.o bseq.o sketch.o sdust.o options.o index.o \
 			lchain.o align.o hit.o seed.o map.o format.o pe.o esterr.o splitidx.o \
-			ksw2_ll_sse.o debug.o # add new <file>.cuda/.c as file.o here
+			ksw2_ll_sse.o plchain.o # add new <file>.cuda/.c as file.o here
 PROG=		minimap2
 PROG_EXTRA=	sdust minimap2-lite
 LIBS=		-lm -lz -lpthread
@@ -133,7 +133,7 @@ ksw2_exts2_sse.o: ksw2.h kalloc.h
 ksw2_extz2_sse.o: ksw2.h kalloc.h
 ksw2_ll_sse.o: ksw2.h kalloc.h
 kthread.o: kthread.h
-lchain.o: mmpriv.h minimap.h bseq.h kseq.h kalloc.h krmq.h
+lchain.o: mmpriv.h minimap.h bseq.h kseq.h kalloc.h krmq.h 
 main.o: bseq.h minimap.h mmpriv.h kseq.h ketopt.h
 map.o: kthread.h kvec.h kalloc.h sdust.h mmpriv.h minimap.h bseq.h kseq.h
 map.o: khash.h ksort.h
