@@ -5,7 +5,6 @@
 #include "mmpriv.h"
 #include "kalloc.h"
 #include "krmq.h"
-// #include "plchain.h"
 
 static int64_t mg_chain_bk_end(int32_t max_drop, const mm128_t *z, const int32_t *f, const int64_t *p, int32_t *t, int64_t k)
 {

@@ -5,7 +5,6 @@
 #include "mmpriv.h" // declare functions in this header
 #include "kalloc.h"
 #include "krmq.h"
-// #include "plchain.h"
 
 /* 
 
