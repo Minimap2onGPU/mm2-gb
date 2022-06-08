@@ -64,7 +64,7 @@ mm_reg1_t *mm_gen_regs(void *km, uint32_t hash, int qlen, int n_u, uint64_t *u, 
 		h = (uint32_t)hash64((hash64(a[k].x) + hash64(a[k].y)) ^ hash);
 		z[i].x = u[i] ^ h; // u[i] -- higher 32 bits: chain score; lower 32 bits: number of seeds in the chain
 		z[i].y = (uint64_t)k << 32 | (int32_t)u[i];
-		k += (int32_t)u[i];
+		k += (int32_t)u[i];   //k is the sum of lower 32 bits of u[] which is the returned length of a[]
 	}
 	radix_sort_128x(z, z + n_u);
 	for (i = 0; i < n_u>>1; ++i) // reverse, s.t. larger score first
@@ -74,12 +74,12 @@ mm_reg1_t *mm_gen_regs(void *km, uint32_t hash, int qlen, int n_u, uint64_t *u, 
 	r = (mm_reg1_t*)calloc(n_u, sizeof(mm_reg1_t));
 	for (i = 0; i < n_u; ++i) {
 		mm_reg1_t *ri = &r[i];
-		ri->id = i;
+		ri->id = i; // Chain id
 		ri->parent = MM_PARENT_UNSET;
 		ri->score = ri->score0 = z[i].x >> 32;
-		ri->hash = (uint32_t)z[i].x;
-		ri->cnt = (int32_t)z[i].y;
-		ri->as = z[i].y >> 32;
+		ri->hash = (uint32_t)z[i].x; // Customized hash key
+		ri->cnt = (int32_t)z[i].y; //(The num of anchors in the chain)
+		ri->as = z[i].y >> 32;  //(The index of first anchor in the chain)
 		ri->div = -1.0f;
 		mm_reg_set_coor(ri, qlen, a, is_qstrand);
 	}

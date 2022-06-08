@@ -957,6 +957,35 @@ void mm_update_dp_max(int qlen, int n_regs, mm_reg1_t *regs, float frac, int a, 
 	}
 }
 
+/* Input:
+ *   a[].x: tid<<33 | rev<<32 | tpos: reference position
+ *   a[].y: flags<<40 | q_span<<32 | q_pos: query position
+ * Output:
+ *   n_regs_: #chains
+ *   n_regs : Type Definition see in minimap.h:101 :
+ * 
+ * 	typedef struct {
+	int32_t id;             // ID for internal uses (see also parent below)
+	int32_t cnt;            // number of minimizers; if on the reverse strand
+	int32_t rid;            // reference index; if this is an alignment from inversion rescue
+	int32_t score;          // DP alignment score
+	int32_t qs, qe, rs, re; // query start and end; reference start and end
+	int32_t parent, subsc;  // parent==id if primary; best alternate mapping score
+	int32_t as;             // offset in the a[] array (for internal uses only) (The index of first anchor in the chain)
+	int32_t mlen, blen;     // seeded exact match length; seeded alignment block length
+	int32_t n_sub;          // number of suboptimal mappings
+	int32_t score0;         // initial chaining score (before chain merging/spliting)
+	uint32_t mapq:8, split:2, rev:1, inv:1, sam_pri:1, proper_frag:1, pe_thru:1, seg_split:1, seg_id:8, split_inv:1, is_alt:1, strand_retained:1, dummy:5;
+	uint32_t hash;
+	float div;
+	mm_extra_t *p;
+} mm_reg1_t;    // One for a chain
+ * 
+ * 
+ *   u[]: score<<32 | #anchors (sum of lower 32 bits of u[] is the returned length of a[])
+ * input a[] is deallocated on return
+ */
+
 mm_reg1_t *mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int qlen, const char *qstr, int *n_regs_, mm_reg1_t *regs, mm128_t *a)
 {
 	extern unsigned char seq_nt4_table[256];
@@ -965,25 +994,39 @@ mm_reg1_t *mm_align_skeleton(void *km, const mm_mapopt_t *opt, const mm_idx_t *m
 	ksw_extz_t ez;
 
 	// encode the query sequence
-	qseq0[0] = (uint8_t*)kmalloc(km, qlen * 2);
-	qseq0[1] = qseq0[0] + qlen;
+	qseq0[0] = (uint8_t*)kmalloc(km, qlen * 2);    //qseq0[0] is the encoded query string 
+	qseq0[1] = qseq0[0] + qlen;                    //The second piece pointer
 	for (i = 0; i < qlen; ++i) {
-		qseq0[0][i] = seq_nt4_table[(uint8_t)qstr[i]];
-		qseq0[1][qlen - 1 - i] = qseq0[0][i] < 4? 3 - qseq0[0][i] : 4;
+		qseq0[0][i] = seq_nt4_table[(uint8_t)qstr[i]];  // Encoding
+		qseq0[1][qlen - 1 - i] = qseq0[0][i] < 4? 3 - qseq0[0][i] : 4;  //Reversed encoding
 	}
 
 	// align through seed hits
-	n_a = mm_squeeze_a(km, n_regs, regs, a);
+	n_a = mm_squeeze_a(km, n_regs, regs, a); // squeeze out regions in a[] that are not referenced by regs[]
 	memset(&ez, 0, sizeof(ksw_extz_t));
-	for (i = 0; i < n_regs; ++i) {
+/*
+typedef struct {
+	uint32_t max:31, zdropped:1;
+	int max_q, max_t;      // max extension coordinate
+	int mqe, mqe_t;        // max score when reaching the end of query
+	int mte, mte_q;        // max score when reaching the end of target
+	int score;             // max score reaching both ends; may be KSW_NEG_INF
+	int m_cigar, n_cigar;
+	int reach_end;
+	uint32_t *cigar;
+} ksw_extz_t;
+
+*/
+
+	for (i = 0; i < n_regs; ++i) {  // Each iteration we perform a DP pass of one chain
 		mm_reg1_t r2;
 		if ((opt->flag&MM_F_SPLICE) && (opt->flag&MM_F_SPLICE_FOR) && (opt->flag&MM_F_SPLICE_REV)) { // then do two rounds of alignments for both strands
 			mm_reg1_t s[2], s2[2];
 			int which, trans_strand;
 			s[0] = s[1] = regs[i];
-			mm_align1(km, opt, mi, qlen, qseq0, &s[0], &s2[0], n_a, a, &ez, MM_F_SPLICE_FOR);
-			mm_align1(km, opt, mi, qlen, qseq0, &s[1], &s2[1], n_a, a, &ez, MM_F_SPLICE_REV);
-			if (s[0].p->dp_score > s[1].p->dp_score) which = 0, trans_strand = 1;
+			mm_align1(km, opt, mi, qlen, qseq0, &s[0], &s2[0], n_a, a, &ez, MM_F_SPLICE_FOR);  
+			mm_align1(km, opt, mi, qlen, qseq0, &s[1], &s2[1], n_a, a, &ez, MM_F_SPLICE_REV);  // DP pass on both forward direction and reversed direction 
+			if (s[0].p->dp_score > s[1].p->dp_score) which = 0, trans_strand = 1;   //"which" is to choose which direction will be used
 			else if (s[0].p->dp_score < s[1].p->dp_score) which = 1, trans_strand = 2;
 			else trans_strand = 3, which = (qlen + s[0].p->dp_score) & 1; // randomly choose a strand, effectively
 			if (which == 0) {
