@@ -11,3 +11,4 @@ data/**
 test.sam
 *.sam
 Log/**
+debug/**
