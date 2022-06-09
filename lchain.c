@@ -159,7 +159,7 @@ mm128_t *mg_lchain_dp(
 	int64_t st = 0, n_iter = 0; // NOTE: n_iter: scores calculated
 	uint64_t *u;
 
-    if (!NULL) pred_range_fptr = fopen("./Log/prange.csv", "w+");
+    if (!pred_range_fptr) pred_range_fptr = fopen("./Log/predecessorrange.csv", "w+");
 
     if (_u) *_u = 0, *n_u_ = 0;
 	if (n == 0 || a == 0) {
@@ -222,8 +222,9 @@ mm128_t *mg_lchain_dp(
 			max_ii = i;
 		if (mmax_f < max_f) mmax_f = max_f;
 	}
+    fprintf(pred_range_fptr, "\n");
 
-	// NOTE: t is not use, v is updated, f & p are inputs, n_u & n_v are outputs.
+    // NOTE: t is not use, v is updated, f & p are inputs, n_u & n_v are outputs.
 	u = mg_chain_backtrack(km, n, f, p, v, t, min_cnt, min_sc, max_drop, &n_u, &n_v);
 	*n_u_ = n_u, *_u = u; // NB: note that u[] may not be sorted by score here
 	kfree(km, p); kfree(km, f); kfree(km, t);
