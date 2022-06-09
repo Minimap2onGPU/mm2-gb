@@ -160,8 +160,6 @@ mm128_t *mg_lchain_dp(
 	int64_t st = 0, n_iter = 0; // NOTE: n_iter: scores calculated
 	uint64_t *u;
 
-    if (!NULL) pred_range_fptr = fopen("./Log/prange.csv", "w+");
-
     if (_u) *_u = 0, *n_u_ = 0;
 	if (n == 0 || a == 0) {
 		kfree(km, a);
@@ -175,8 +173,8 @@ mm128_t *mg_lchain_dp(
 	KMALLOC(km, v, n); // NOTE: max score upto i
 	KCALLOC(km, t, n); // NOTE: used to track if it is a predecessor of an anchor already chained to
 
-	range_selection();
-	fprintf(pred_range_fptr, "Number of anchors: %ld, Num of Seg: %d\n", n, n_seg);
+	debug_chain_input(a, n, max_iter, max_dist_x, max_dist_y, max_skip,\ 
+                        bw, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
 	// fill the score and backtrack arrays
 	for (i = 0, max_ii = -1; i < n; ++i) { 
 		// NOTE: iterate through all the anchors. i: current anchor idx
@@ -226,8 +224,6 @@ mm128_t *mg_lchain_dp(
 			max_ii = i;
 		if (mmax_f < max_f) mmax_f = max_f;
 	}
-
-	forward_dp();
 
 	// NOTE: t is not use, v is updated, f & p are inputs, n_u & n_v are outputs.
 	u = mg_chain_backtrack(km, n, f, p, v, t, min_cnt, min_sc, max_drop, &n_u, &n_v);

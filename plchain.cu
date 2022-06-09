@@ -2,9 +2,10 @@
 #include <string.h>
 #include <stdio.h>
 #include <assert.h>
-#include "mmpriv.h" // declare functions in this header
+#include "mmpriv.h"
 #include "kalloc.h"
 #include "krmq.h"
+#include "plchain.h"
 
 /* 
 
@@ -15,6 +16,7 @@ Parallel chaining helper functions with CUDA
 // template kernel code
 
 #define NUM_THREADS	32
+#define NUM_ANCHORS_BLOCK 512
 
 __global__ void temp_func(unsigned int opt) {
     __shared__ uint s_data[NUM_THREADS];
@@ -30,6 +32,14 @@ __global__ void temp_func(unsigned int opt) {
     __syncthreads();
 
     s_data[(tid+2)%12] += opt;
+
+}
+
+__global__ void check_dist(mm128_t *a, int64_t n, int max_dist_x, int max_iter) {
+    __shared__ mm128_t anchors[NUM_ANCHORS_BLOCK];
+    
+    int tid = threadIdx.x;
+
 
 }
 

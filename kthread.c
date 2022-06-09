@@ -54,7 +54,7 @@ static void *ktf_worker(void *data)
 void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n)
 {
 	// DEBUG: force to run on only one thread
-    // n_threads = 1; // NOTE: comment this to enable multithread
+    n_threads = 1; // NOTE: comment this to enable multithread
     if (n_threads > 1) {
         int i;
 		kt_for_t t;

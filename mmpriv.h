@@ -5,6 +5,8 @@
 #include "minimap.h"
 #include "bseq.h"
 #include "kseq.h"
+#include "plchain.h"
+
 
 #define MM_PARENT_UNSET   (-1)
 #define MM_PARENT_TMP_PRI (-2)
@@ -36,6 +38,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
 
 typedef struct {
 	uint32_t n;
@@ -124,14 +127,6 @@ static inline float mg_log2(float x) // NB: this doesn't work when x<2
 	log_2 += (-0.34484843f * z.f + 2.02466578f) * z.f - 0.67487759f;
 	return log_2;
 }
-
-// CUDA functions
-void range_selection();
-void forward_dp();
-
-// debug functions
-void debug_print(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n);
-void debug_fprint(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n);
 
 #ifdef __cplusplus
 }
