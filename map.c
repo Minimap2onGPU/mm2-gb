@@ -277,25 +277,27 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 
 	chn_pen_gap  = opt->chain_gap_scale * 0.01 * mi->k;
 	chn_pen_skip = opt->chain_skip_scale * 0.01 * mi->k;
-	if (opt->flag & MM_F_RMQ) {
-		a = mg_lchain_rmq(opt->max_gap, opt->rmq_inner_dist, opt->bw, opt->max_chain_skip, opt->rmq_size_cap, opt->min_cnt, opt->min_chain_score,
-						  chn_pen_gap, chn_pen_skip, n_a, a, &n_regs0, &u, b->km);
-	} else {
+	// if (opt->flag & MM_F_RMQ) {
+	// 	a = mg_lchain_rmq(opt->max_gap, opt->rmq_inner_dist, opt->bw, opt->max_chain_skip, opt->rmq_size_cap, opt->min_cnt, opt->min_chain_score,
+	// 					  chn_pen_gap, chn_pen_skip, n_a, a, &n_regs0, &u, b->km);
+	// } else 
+	{
 		a = mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
 						 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
 	}
 
-	if (opt->bw_long > opt->bw && (opt->flag & (MM_F_SPLICE|MM_F_SR|MM_F_NO_LJOIN)) == 0 && n_segs == 1 && n_regs0 > 1) { // re-chain/long-join for long sequences
-		int32_t st = (int32_t)a[0].y, en = (int32_t)a[(int32_t)u[0] - 1].y;
-		if (qlen_sum - (en - st) > opt->rmq_rescue_size || en - st > qlen_sum * opt->rmq_rescue_ratio) {
-			int32_t i;
-			for (i = 0, n_a = 0; i < n_regs0; ++i) n_a += (int32_t)u[i];
-			kfree(b->km, u);
-			radix_sort_128x(a, a + n_a);
-			a = mg_lchain_rmq(opt->max_gap, opt->rmq_inner_dist, opt->bw_long, opt->max_chain_skip, opt->rmq_size_cap, opt->min_cnt, opt->min_chain_score,
-							  chn_pen_gap, chn_pen_skip, n_a, a, &n_regs0, &u, b->km);
-		}
-	} else if (opt->max_occ > opt->mid_occ && rep_len > 0 && !(opt->flag & MM_F_RMQ)) { // re-chain, mostly for short reads
+	// if (opt->bw_long > opt->bw && (opt->flag & (MM_F_SPLICE|MM_F_SR|MM_F_NO_LJOIN)) == 0 && n_segs == 1 && n_regs0 > 1) { // re-chain/long-join for long sequences
+	// 	int32_t st = (int32_t)a[0].y, en = (int32_t)a[(int32_t)u[0] - 1].y;
+	// 	if (qlen_sum - (en - st) > opt->rmq_rescue_size || en - st > qlen_sum * opt->rmq_rescue_ratio) {
+	// 		int32_t i;
+	// 		for (i = 0, n_a = 0; i < n_regs0; ++i) n_a += (int32_t)u[i];
+	// 		kfree(b->km, u);
+	// 		radix_sort_128x(a, a + n_a);
+	// 		a = mg_lchain_rmq(opt->max_gap, opt->rmq_inner_dist, opt->bw_long, opt->max_chain_skip, opt->rmq_size_cap, opt->min_cnt, opt->min_chain_score,
+	// 						  chn_pen_gap, chn_pen_skip, n_a, a, &n_regs0, &u, b->km);
+	// }
+	// } else 
+	if (opt->max_occ > opt->mid_occ && rep_len > 0 && !(opt->flag & MM_F_RMQ)) { // re-chain, mostly for short reads
 		int rechain = 0;
 		if (n_regs0 > 0) { // test if the best chain has all the segments
 			int n_chained_segs = 1, max = 0, max_i = -1, max_off = -1, off = 0;
