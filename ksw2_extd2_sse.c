@@ -31,6 +31,19 @@ void ksw_extd2_sse2(void *km, int qlen, const uint8_t *query, int tlen, const ui
 				   int8_t q, int8_t e, int8_t q2, int8_t e2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez)
 #endif
 #else
+//k-long gap costs min{q+k*e,q2+k*e2}  q,e will be combined to define the gap costs
+//m=5
+//int8_t mat[25];
+	/*
+	a b b b s
+	b a b b s
+	b b a b s
+	b b b a s
+	s s s s s
+	*/
+//a --- opt->a --- matching score
+//b --- opt->b --- mismatch penalty
+//s --- opt->sc_ambi --- score when one or both bases are "N"?
 void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
 				   int8_t q, int8_t e, int8_t q2, int8_t e2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez)
 #endif // ~KSW_CPU_DISPATCH
