@@ -6,6 +6,17 @@
 #include "mmpriv.h"
 #include "ksw2.h"
 
+// m: size
+// a: positive
+// b: negative
+// sc_ambi: negative
+/* e.g.
+a b b b s
+b a b b s
+b b a b s
+b b b a s
+s s s s s
+*/
 static void ksw_gen_simple_mat(int m, int8_t *mat, int8_t a, int8_t b, int8_t sc_ambi)
 {
 	int i, j;
@@ -580,17 +591,26 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 	int32_t rs1, qs1, re1, qe1;
 	int8_t mat[25];
 
+	// sr: single-end short read
+	// HPC: homopolymer-compressed
 	if (is_sr) assert(!(mi->flag & MM_I_HPC)); // HPC won't work with SR because with HPC we can't easily tell if there is a gap
 
 	r2->cnt = 0;
 	if (r->cnt == 0) return;
+	/*
+	a b b b s
+	b a b b s
+	b b a b s
+	b b b a s
+	s s s s s
+	*/
 	ksw_gen_simple_mat(5, mat, opt->a, opt->b, opt->sc_ambi);
 	bw = (int)(opt->bw * 1.5 + 1.);
 	bw_long = (int)(opt->bw_long * 1.5 + 1.);
 	if (bw_long < bw) bw_long = bw;
 
 	if (is_sr && !(mi->flag & MM_I_HPC)) {
-		mm_max_stretch(r, a, &as1, &cnt1);
+		mm_max_stretch(r, a, &as1, &cnt1);	// find the longest chain that has equal lengths between adjacent anchors in reference and query
 		rs = (int32_t)a[as1].x + 1 - (int32_t)(a[as1].y>>32&0xff);
 		qs = (int32_t)a[as1].y + 1 - (int32_t)(a[as1].y>>32&0xff);
 		re = (int32_t)a[as1+cnt1-1].x + 1;
@@ -697,6 +717,8 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 	tseq = (uint8_t*)kmalloc(km, re0 - rs0);
 	junc = (uint8_t*)kmalloc(km, re0 - rs0);
 
+	/***** Alignment Starts *****/
+
 	if (qs > 0 && rs > 0) { // left extension; probably the condition can be changed to "qs > qs0 && rs > rs0"
 		if (opt->flag & MM_F_QSTRAND) {
 			qseq = &qseq0[0][qs0];
@@ -706,6 +728,7 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 			mm_idx_getseq(mi, rid, rs0, rs, tseq);
 		}
 		mm_idx_bed_junc(mi, rid, rs0, rs, junc);
+		// reverse the first few bases, then do the extension just like a right extension
 		mm_seq_rev(qs - qs0, qseq);
 		mm_seq_rev(rs - rs0, tseq);
 		mm_seq_rev(rs - rs0, junc);
@@ -821,6 +844,8 @@ static void mm_align1(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, int 
 			r->p->trans_strand ^= 3; // flip to the read strand
 	}
 
+	/***** Alignment Ends *****/
+
 	kfree(km, tseq);
 	kfree(km, junc);
 }
@@ -837,14 +862,14 @@ static int mm_align1_inv(void *km, const mm_mapopt_t *opt, const mm_idx_t *mi, i
 	if (r1->id != r1->parent && r1->parent != MM_PARENT_TMP_PRI) return 0;
 	if (r2->id != r2->parent && r2->parent != MM_PARENT_TMP_PRI) return 0;
 	if (r1->rid != r2->rid || r1->rev != r2->rev) return 0;
-	ql = r1->rev? r1->qs - r2->qe : r2->qs - r1->qe;
-	tl = r2->rs - r1->re;
+	ql = r1->rev? r1->qs - r2->qe : r2->qs - r1->qe;		// query chain length
+	tl = r2->rs - r1->re;									// reference chain length
 	if (ql < opt->min_chain_score || ql > opt->max_gap) return 0;
 	if (tl < opt->min_chain_score || tl > opt->max_gap) return 0;
 
 	ksw_gen_simple_mat(5, mat, opt->a, opt->b, opt->sc_ambi);
 	tseq = (uint8_t*)kmalloc(km, tl);
-	mm_idx_getseq(mi, r1->rid, r1->re, r2->rs, tseq);
+	mm_idx_getseq(mi, r1->rid, r1->re, r2->rs, tseq);	// populate tseq
 	qseq = r1->rev? &qseq0[0][r2->qe] : &qseq0[1][qlen - r2->qs];
 
 	mm_seq_rev(ql, qseq);
