@@ -44,6 +44,7 @@ void ksw_extd2_sse2(void *km, int qlen, const uint8_t *query, int tlen, const ui
 //a --- opt->a --- matching score
 //b --- opt->b --- mismatch penalty
 //s --- opt->sc_ambi --- score when one or both bases are "N"?
+//w bandwidth
 void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
 				   int8_t q, int8_t e, int8_t q2, int8_t e2, int w, int zdrop, int end_bonus, int flag, ksw_extz_t *ez)
 #endif // ~KSW_CPU_DISPATCH
@@ -102,14 +103,15 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 
 	if (w < 0) w = tlen > qlen? tlen : qlen;
 	wl = wr = w;
-	tlen_ = (tlen + 15) / 16;
-	n_col_ = qlen < tlen? qlen : tlen;
-	n_col_ = ((n_col_ < w + 1? n_col_ : w + 1) + 15) / 16 + 1;
-	qlen_ = (qlen + 15) / 16;
+	tlen_ = (tlen + 15) / 16;    // tlen_: need how many vectors for reference chain
+	n_col_ = qlen < tlen? qlen : tlen;  
+	n_col_ = ((n_col_ < w + 1? n_col_ : w + 1) + 15) / 16 + 1;  //n_col_ = 16-aligned min(qlen, tlen, w+1)
+	// n_col_: the length of array to store data in diagonal iterations.
+	qlen_ = (qlen + 15) / 16; //qlen_: need how many vectors for q
 	for (t = 1, max_sc = mat[0], min_sc = mat[1]; t < m * m; ++t) {
 		max_sc = max_sc > mat[t]? max_sc : mat[t];
 		min_sc = min_sc < mat[t]? min_sc : mat[t];
-	}
+	}   // process the mat, get max_sc min_sc
 	if (-min_sc > 2 * (q + e)) return; // otherwise, we won't see any mismatches
 
 	long_thres = e != e2? (q2 - q) / (e - e2) - 1 : 0;
@@ -117,10 +119,10 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 		++long_thres;
 	long_diff = long_thres * (e - e2) - (q2 - q) - e2;
 
-	mem = (uint8_t*)kcalloc(km, tlen_ * 8 + qlen_ + 1, 16);
+	mem = (uint8_t*)kcalloc(km, tlen_ * 8 + qlen_ + 1, 16); //?
 	u = (__m128i*)(((size_t)mem + 15) >> 4 << 4); // 16-byte aligned
 	v = u + tlen_, x = v + tlen_, y = x + tlen_, x2 = y + tlen_, y2 = x2 + tlen_;
-	s = y2 + tlen_, sf = (uint8_t*)(s + tlen_), qr = sf + tlen_ * 16;
+	s = y2 + tlen_, sf = (uint8_t*)(s + tlen_), qr = sf + tlen_ * 16; //u,v,x,y,x2,y2,s,sf each length is tlen_*16 bytes, placed in mem
 	memset(u,  -q  - e,  tlen_ * 16);
 	memset(v,  -q  - e,  tlen_ * 16);
 	memset(x,  -q  - e,  tlen_ * 16);
@@ -129,48 +131,52 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 	memset(y2, -q2 - e2, tlen_ * 16);
 	if (!approx_max) {
 		H = (int32_t*)kmalloc(km, tlen_ * 16 * 4);
-		for (t = 0; t < tlen_ * 16; ++t) H[t] = KSW_NEG_INF;
+		for (t = 0; t < tlen_ * 16; ++t) H[t] = KSW_NEG_INF;  //Init H[i] = -inf
 	}
 	if (with_cigar) {
-		mem2 = (uint8_t*)kmalloc(km, ((size_t)(qlen + tlen - 1) * n_col_ + 1) * 16);
-		p = (__m128i*)(((size_t)mem2 + 15) >> 4 << 4);
-		off = (int*)kmalloc(km, (qlen + tlen - 1) * sizeof(int) * 2);
+		mem2 = (uint8_t*)kmalloc(km, ((size_t)(qlen + tlen - 1) * n_col_ + 1) * 16); // qlen + tlen - 1 = number of diagonal iterations
+		p = (__m128i*)(((size_t)mem2 + 15) >> 4 << 4); //16-byte aligned, represent using p
+		// In the backtrack matrix, value p[] has the following structure:
+		//   bit 0-2: which type gets the max - 0 for H, 1 for E, 2 for F, 3 for \tilde{E} and 4 for \tilde{F}
+		//   bit 3/0x08: 1 if a continuation on the E state (bit 5/0x20 for a continuation on \tilde{E})
+		//   bit 4/0x10: 1 if a continuation on the F state (bit 6/0x40 for a continuation on \tilde{F})
+		off = (int*)kmalloc(km, (qlen + tlen - 1) * sizeof(int) * 2); // off is a int array using r to index
 		off_end = off + qlen + tlen - 1;
 	}
 
-	for (t = 0; t < qlen; ++t) qr[t] = query[qlen - 1 - t];
-	memcpy(sf, target, tlen);
+	for (t = 0; t < qlen; ++t) qr[t] = query[qlen - 1 - t]; //qr is query reverse
+	memcpy(sf, target, tlen); // sf = reference chain
 
-	for (r = 0, last_st = last_en = -1; r < qlen + tlen - 1; ++r) {
-		int st = 0, en = tlen - 1, st0, en0, st_, en_;
+	for (r = 0, last_st = last_en = -1; r < qlen + tlen - 1; ++r) {   //Outer for loop, last_st = "last start", "last end"
+		int st = 0, en = tlen - 1, st0, en0, st_, en_; // r is iteration index of organal; t_len is at x axis, q_len is the atg y_axis
 		int8_t x1, x21, v1;
-		uint8_t *qrr = qr + (qlen - 1 - r);
-		int8_t *u8 = (int8_t*)u, *v8 = (int8_t*)v, *x8 = (int8_t*)x, *x28 = (int8_t*)x2;
+		uint8_t *qrr = qr + (qlen - 1 - r);  // This is like a offset pointer. Effect: qrr[t] & sf[t] is the needed index when we have  st < t < en.
+		int8_t *u8 = (int8_t*)u, *v8 = (int8_t*)v, *x8 = (int8_t*)x, *x28 = (int8_t*)x2;  //x8 is 8-byte address of x
 		__m128i x1_, x21_, v1_;
 		// find the boundaries
-		if (st < r - qlen + 1) st = r - qlen + 1;
-		if (en > r) en = r;
-		if (st < (r-wr+1)>>1) st = (r-wr+1)>>1; // take the ceil
-		if (en > (r+wl)>>1) en = (r+wl)>>1; // take the floor
+		if (st < r - qlen + 1) st = r - qlen + 1;  // Correct the value of st iif r is large, during each iteration (Can be explained using figure)
+		if (en > r) en = r; // Correct the en if r is small
+		if (st < (r-wr+1)>>1) st = (r-wr+1)>>1; // take the ceil, choose the band position
+		if (en > (r+wl)>>1) en = (r+wl)>>1; // take the floor, choose the band position
 		if (st > en) {
 			ez->zdropped = 1;
 			break;
 		}
-		st0 = st, en0 = en;
-		st = st / 16 * 16, en = (en + 16) / 16 * 16 - 1;
+		st0 = st, en0 = en;   // Store the orignal st and en into st0 and en0
+		st = st / 16 * 16, en = (en + 16) / 16 * 16 - 1;   //16-align the st/en
 		// set boundary conditions
 		if (st > 0) {
 			if (st - 1 >= last_st && st - 1 <= last_en) {
 				x1 = x8[st - 1], x21 = x28[st - 1], v1 = v8[st - 1]; // (r-1,s-1) calculated in the last round
-			} else {
+			} else {  // else means cannot use at least one "pre-value" in the last round
 				x1 = -q - e, x21 = -q2 - e2;
-				v1 = -q - e;
+				v1 = -q - e;   // assign initial value
 			}
-		} else {
+		} else {  //st == 0
 			x1 = -q - e, x21 = -q2 - e2;
 			v1 = r == 0? -q - e : r < long_thres? -e : r == long_thres? long_diff : -e2;
 		}
-		if (en >= r) {
+		if (en >= r) {  // en==r
 			((int8_t*)y)[r] = -q - e, ((int8_t*)y2)[r] = -q2 - e2;
 			u8[r] = r == 0? -q - e : r < long_thres? -e : r == long_thres? long_diff : -e2;
 		}
@@ -178,8 +184,8 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 		if (!(flag & KSW_EZ_GENERIC_SC)) {
 			for (t = st0; t <= en0; t += 16) {
 				__m128i sq, st, tmp, mask;
-				sq = _mm_loadu_si128((__m128i*)&sf[t]);
-				st = _mm_loadu_si128((__m128i*)&qrr[t]);
+				sq = _mm_loadu_si128((__m128i*)&sf[t]); //sq = sf = reference chain
+				st = _mm_loadu_si128((__m128i*)&qrr[t]); //st = qrr = partial reverse query chain
 				mask = _mm_or_si128(_mm_cmpeq_epi8(sq, m1_), _mm_cmpeq_epi8(st, m1_));
 				tmp = _mm_cmpeq_epi8(sq, st);
 #ifdef __SSE4_1__
@@ -193,13 +199,13 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 			}
 		} else {
 			for (t = st0; t <= en0; ++t)
-				((uint8_t*)s)[t] = mat[sf[t] * m + qrr[t]];
+				((uint8_t*)s)[t] = mat[sf[t] * m + qrr[t]];  // Preprocess the score, matrix is like a lookup table.
 		}
 		// core loop
-		x1_  = _mm_cvtsi32_si128((uint8_t)x1);
+		x1_  = _mm_cvtsi32_si128((uint8_t)x1); //Only fill the last 32 bits
 		x21_ = _mm_cvtsi32_si128((uint8_t)x21);
 		v1_  = _mm_cvtsi32_si128((uint8_t)v1);
-		st_ = st / 16, en_ = en / 16;
+		st_ = st / 16, en_ = en / 16;  // Vecter number
 		assert(en_ - st_ + 1 <= n_col_);
 		if (!with_cigar) { // score only
 			for (t = st_; t <= en_; ++t) {
@@ -239,7 +245,7 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 #endif
 			}
 		} else if (!(flag&KSW_EZ_RIGHT)) { // gap left-alignment
-			__m128i *pr = p + (size_t)r * n_col_ - st_;
+			__m128i *pr = p + (size_t)r * n_col_ - st_; //16-divide the p, and do iterations
 			off[r] = st, off_end[r] = en;
 			for (t = st_; t <= en_; ++t) {
 				__m128i d, z, a, b, a2, b2, xt1, x2t1, vt1, ut, tmp;
@@ -286,11 +292,31 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 				_mm_store_si128(&pr[t], d);
 			}
 		} else { // gap right-alignment
-			__m128i *pr = p + (size_t)r * n_col_ - st_;
-			off[r] = st, off_end[r] = en;
+			__m128i *pr = p + (size_t)r * n_col_ - st_; // p is the matrix to store all the data when doing DP.
+			off[r] = st, off_end[r] = en; // off is a r_length*2 length int array, off_end is the pointer to the middle
 			for (t = st_; t <= en_; ++t) {
 				__m128i d, z, a, b, a2, b2, xt1, x2t1, vt1, ut, tmp;
 				__dp_code_block1;
+				/*
+				z = _mm_load_si128(&s[t]); \                      z = s
+				xt1 = _mm_load_si128(&x[t]);                      xt1 = x(r-1)[t...t+15]
+				tmp = _mm_srli_si128(xt1, 15);                   /* tmp <- x(r-1)[t+15] 
+				xt1 = _mm_or_si128(_mm_slli_si128(xt1, 1), x1_); /* xt1 <- x(r-1)[t-1..t+14] 
+				x1_ = tmp; \
+				vt1 = _mm_load_si128(&v[t]);                     /* vt1 <- v[r-1][t..t+15] 
+				tmp = _mm_srli_si128(vt1, 15);                   /* tmp <- v[r-1][t+15] 
+				vt1 = _mm_or_si128(_mm_slli_si128(vt1, 1), v1_); /* vt1 <- v[r-1][t-1..t+14] 
+				v1_ = tmp; \
+				a = _mm_add_epi8(xt1, vt1);                      /* a <- x[r-1][t-1..t+14] + v[r-1][t-1..t+14] 
+				ut = _mm_load_si128(&u[t]);                      /* ut <- u[t..t+15] 
+				b = _mm_add_epi8(_mm_load_si128(&y[t]), ut);     /* b <- y[r-1][t..t+15] + u[r-1][t..t+15] 
+				x2t1= _mm_load_si128(&x2[t]); \
+				tmp = _mm_srli_si128(x2t1, 15); \
+				x2t1= _mm_or_si128(_mm_slli_si128(x2t1, 1), x21_); \
+				x21_= tmp; \
+				a2= _mm_add_epi8(x2t1, vt1); \
+				b2= _mm_add_epi8(_mm_load_si128(&y2[t]), ut);
+				*/
 #ifdef __SSE4_1__
 				d = _mm_andnot_si128(_mm_cmpgt_epi8(z, a), _mm_set1_epi8(1));    // d = z > a?  0 : 1
 				z = _mm_max_epi8(z, a);
@@ -318,6 +344,17 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 				z = _mm_or_si128(_mm_and_si128(tmp, sc_mch_), _mm_andnot_si128(tmp, z));
 #endif
 				__dp_code_block2;
+				/*
+				_mm_store_si128(&u[t], _mm_sub_epi8(z, vt1));     u[r][t..t+15] <- z - v[r-1][t-1..t+14] 
+				_mm_store_si128(&v[t], _mm_sub_epi8(z, ut));      v[r][t..t+15] <- z - u[r-1][t..t+15] 
+				tmp = _mm_sub_epi8(z, q_);
+				a = _mm_sub_epi8(a, tmp); \
+				b = _mm_sub_epi8(b, tmp); \
+				tmp = _mm_sub_epi8(z, q2_); \
+				a2= _mm_sub_epi8(a2, tmp); \
+				b2= _mm_sub_epi8(b2, tmp);
+				*/
+
 				tmp = _mm_cmpgt_epi8(zero_, a);
 				_mm_store_si128(&x[t],  _mm_sub_epi8(_mm_andnot_si128(tmp, a),  qe_));
 				d = _mm_or_si128(d, _mm_andnot_si128(tmp, _mm_set1_epi8(0x08))); // d = a > 0? 1<<3 : 0
@@ -331,7 +368,7 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 				_mm_store_si128(&y2[t], _mm_sub_epi8(_mm_andnot_si128(tmp, b2), qe2_));
 				d = _mm_or_si128(d, _mm_andnot_si128(tmp, _mm_set1_epi8(0x40))); // d = b > 0? 1<<6 : 0
 				_mm_store_si128(&pr[t], d);
-			}
+			} // Core loop ended (inner loop)
 		}
 		if (!approx_max) { // find the exact max with a 32-bit score array
 			int32_t max_H, max_t;
