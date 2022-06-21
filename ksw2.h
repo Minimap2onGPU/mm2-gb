@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#define DEBUG_NUM 100
+
 #define KSW_NEG_INF -0x40000000
 
 #define KSW_EZ_SCORE_ONLY  0x01 // don't record alignment path/cigar
@@ -144,6 +146,10 @@ static inline void ksw_backtrack(void *km, int is_rot, int is_rev, int min_intro
 		else if (!(tmp >> (state + 2) & 1)) state = 0; // if requesting other states, _state_ stays the same if it is a continuation; otherwise, set to H
 		if (state == 0) state = tmp & 7; // TODO: probably this line can be merged into the "else if" line right above; not 100% sure
 		if (force_state >= 0) state = force_state;
+		// #define KSW_CIGAR_MATCH  0
+		// #define KSW_CIGAR_INS    1
+		// #define KSW_CIGAR_DEL    2
+		// #define KSW_CIGAR_N_SKIP 3
 		if (state == 0) cigar = ksw_push_cigar(km, &n_cigar, &m_cigar, cigar, KSW_CIGAR_MATCH, 1), --i, --j;
 		else if (state == 1 || (state == 3 && min_intron_len <= 0)) cigar = ksw_push_cigar(km, &n_cigar, &m_cigar, cigar, KSW_CIGAR_DEL, 1), --i;
 		else if (state == 3 && min_intron_len > 0) cigar = ksw_push_cigar(km, &n_cigar, &m_cigar, cigar, KSW_CIGAR_N_SKIP, 1), --i;

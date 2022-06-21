@@ -22,6 +22,10 @@
 #endif
 #endif
 
+extern FILE *align_score_file;
+extern int debug_count;
+extern int print_flag;
+
 #ifdef KSW_CPU_DISPATCH
 #ifdef __SSE4_1__
 void ksw_extd2_sse41(void *km, int qlen, const uint8_t *query, int tlen, const uint8_t *target, int8_t m, const int8_t *mat,
@@ -77,6 +81,11 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 	tmp = _mm_sub_epi8(z, q2_); \
 	a2= _mm_sub_epi8(a2, tmp); \
 	b2= _mm_sub_epi8(b2, tmp);
+
+	if (print_flag && !align_score_file) {
+		align_score_file = fopen("debug/align_score.output", "w");
+		fprintf(align_score_file, "(r, t | u, v, x, y)\n");
+	}
 
 	int r, t, qe = q + e, n_col_, *off = 0, *off_end = 0, tlen_, qlen_, last_st, last_en, wl, wr, max_sc, min_sc, long_thres, long_diff;
 	int with_cigar = !(flag&KSW_EZ_SCORE_ONLY), approx_max = !!(flag&KSW_EZ_APPROX_MAX);
@@ -395,7 +404,15 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 				ez->score = H0;
 		}
 		last_st = st, last_en = en;
-		//for (t = st0; t <= en0; ++t) printf("(%d,%d)\t(%d,%d,%d,%d)\t%d\n", r, t, ((int8_t*)u)[t], ((int8_t*)v)[t], ((int8_t*)x)[t], ((int8_t*)y)[t], H[t]); // for debugging
+
+		if (print_flag && debug_count < DEBUG_NUM) {
+			// Debug output
+			for (t = st0; t <= en0; ++t) {
+				fprintf(align_score_file, "(%d,%d|%d,%d,%d,%d)", r, t, ((int8_t*)u)[t], ((int8_t*)v)[t], ((int8_t*)x)[t], ((int8_t*)y)[t]); // for debugging
+			}
+			fprintf(align_score_file, "\n");
+			// fprintf(align_score_file, "%d %d\n", tlen, qlen);
+		}
 	}
 	kfree(km, mem);
 	if (!approx_max) kfree(km, H);

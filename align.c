@@ -6,6 +6,8 @@
 #include "mmpriv.h"
 #include "ksw2.h"
 
+#include <stdio.h>
+
 // m: size
 // a: positive
 // b: negative
@@ -324,7 +326,11 @@ static void mm_append_cigar(mm_reg1_t *r, uint32_t n_cigar, uint32_t *cigar) // 
 	}
 }
 
-
+FILE *align_in_file = NULL;
+FILE *align_cigar_file = NULL;
+FILE *align_score_file = NULL;
+int debug_count = 0;
+int print_flag = 0;
 //qlen= qe- qs tlen = re-rs
 static void mm_align_pair(void *km, const mm_mapopt_t *opt, int qlen, const uint8_t *qseq, int tlen, const uint8_t *tseq, const uint8_t *junc, const int8_t *mat, int w, int end_bonus, int zdrop, int flag, ksw_extz_t *ez)
 {
@@ -343,8 +349,39 @@ static void mm_align_pair(void *km, const mm_mapopt_t *opt, int qlen, const uint
 		ksw_exts2_sse(km, qlen, qseq, tlen, tseq, 5, mat, opt->q, opt->e, opt->q2, opt->noncan, zdrop, opt->junc_bonus, flag, junc, ez);
 	else if (opt->q == opt->q2 && opt->e == opt->e2)
 		ksw_extz2_sse(km, qlen, qseq, tlen, tseq, 5, mat, opt->q, opt->e, w, zdrop, end_bonus, flag, ez);
-	else
+	else {
+		// Simplified debug output
+		if (!align_in_file) {
+			printf("0\n");
+			align_in_file = fopen("debug/align.input", "w");
+			fprintf(align_in_file, "tlen\tqlen\tq\tq2\te\te2\tw\tflag\tzdrop\n");
+		}
+
+		if (debug_count < DEBUG_NUM) {
+			fprintf(align_in_file, "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", tlen, qlen, opt->q, opt->q2, opt->e, opt->e2, w, flag, opt->zdrop);
+			for (int i = 0; i < tlen; ++i) fputc("ACGTN"[tseq[i]], align_in_file);
+			fputc('\n', align_in_file);
+			for (int i = 0; i < qlen; ++i) fputc("ACGTN"[qseq[i]], align_in_file);
+			fputc('\n', align_in_file);
+		}
+
+		print_flag = 1;
 		ksw_extd2_sse(km, qlen, qseq, tlen, tseq, 5, mat, opt->q, opt->e, opt->q2, opt->e2, w, zdrop, end_bonus, flag, ez);
+		print_flag = 0;
+
+		if (!align_cigar_file) {
+			printf("1\n");
+			align_cigar_file = fopen("debug/align_cigar.output", "w");
+		}
+		if (debug_count < DEBUG_NUM) {
+			fprintf(align_cigar_file, "%d\n", ez->n_cigar);
+			for (int i = 0; i < ez->n_cigar; ++i)
+				fprintf(align_cigar_file, "%d%c", ez->cigar[i]>>4, MM_CIGAR_STR[ez->cigar[i]&0xf]);
+			fprintf(align_cigar_file, "\n");
+		}
+
+		debug_count++;
+	}
 	if (mm_dbg_flag & MM_DBG_PRINT_ALN_SEQ) {
 		int i;
 		fprintf(stderr, "score=%d, cigar=", ez->score);
