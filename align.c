@@ -354,11 +354,11 @@ static void mm_align_pair(void *km, const mm_mapopt_t *opt, int qlen, const uint
 		if (!align_in_file) {
 			printf("0\n");
 			align_in_file = fopen("debug/align.input", "w");
-			fprintf(align_in_file, "tlen\tqlen\tq\tq2\te\te2\tw\tflag\tzdrop\n");
+			fprintf(align_in_file, "tlen\tqlen\tq\tq2\te\te2\tw\tzdrop\tend_bonus\tflag\n");
 		}
 
 		if (debug_count < DEBUG_NUM) {
-			fprintf(align_in_file, "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", tlen, qlen, opt->q, opt->q2, opt->e, opt->e2, w, flag, opt->zdrop);
+			fprintf(align_in_file, "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", tlen, qlen, opt->q, opt->q2, opt->e, opt->e2, w, opt->zdrop, end_bonus, flag);
 			for (int i = 0; i < tlen; ++i) fputc("ACGTN"[tseq[i]], align_in_file);
 			fputc('\n', align_in_file);
 			for (int i = 0; i < qlen; ++i) fputc("ACGTN"[qseq[i]], align_in_file);
