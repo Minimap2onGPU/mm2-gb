@@ -4,7 +4,7 @@
 #include <assert.h>
 #include "mmpriv.h" // declare functions in this header
 
-const char *filename = "debug/chain_output_short";
+const char *filename = "debug/chain_in_output";
 FILE *output = NULL;
 
 void debug_print(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n) {
