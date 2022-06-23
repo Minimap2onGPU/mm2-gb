@@ -14,11 +14,11 @@ void debug_print(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n) {
     }
 }
 
-void debug_fprint(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n) {
+void debug_chain_output(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n) {
     // print scores, predecessor, prepre to a file
     if (output == NULL) {
         if ((output = fopen(filename, "w+")) == NULL) {
-            printf ("[Debug]: %s can't be opened\n", filename);
+            fprintf(stderr, "[Debug]: %s can't be opened\n", filename);
             exit(0);
         }
     }
@@ -28,11 +28,11 @@ void debug_fprint(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n) {
     }
 }
 
-void debug_chain_fprint(int32_t n_u, uint64_t *u) {
+void debug_chain_result(int32_t n_u, uint64_t *u) {
     // print chains' info to a file
     if (output == NULL) {
         if ((output = fopen(filename, "w+")) == NULL) {
-            printf ("[Debug]: %s can't be opened\n", filename);
+            fprintf(stderr, "[Debug]: %s can't be opened\n", filename);
             exit(0);
         }
     }
@@ -46,7 +46,7 @@ void debug_chain_input(mm128_t *a, int64_t n, int max_iter, int max_dist_x, int 
                         int bw, float chn_pen_gap, float chn_pen_skip, int is_cdna, int n_seg) {
     if (output == NULL) {
         if ((output = fopen(filename, "w+")) == NULL) {
-            printf ("[Debug]: %s can't be opened\n", filename);
+            fprintf(stderr, "[Debug]: %s can't be opened\n", filename);
             exit(0);
         }
     }

@@ -106,7 +106,7 @@ static inline int skip_seed(int flag, uint64_t r, const mm_seed_t *q, const char
 
 static mm128_t *collect_seed_hits_heap(void *km, const mm_mapopt_t *opt, int max_occ, const mm_idx_t *mi, const char *qname, const mm128_v *mv, int qlen, int64_t *n_a, int *rep_len,
 								  int *n_mini_pos, uint64_t **mini_pos)
-{
+{ // NOTE: see how mm128_t is generated 
 	int i, n_m, heap_size = 0;
 	int64_t j, n_for = 0, n_rev = 0;
 	mm_seed_t *m;

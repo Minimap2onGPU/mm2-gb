@@ -146,7 +146,6 @@ static inline int32_t comput_sc(const mm128_t *ai, const mm128_t *aj, int32_t ma
  * input a[] is deallocated on return
  */
 #include <stdio.h>
-FILE *pred_range_fptr = NULL;
 mm128_t *mg_lchain_dp(
     int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter,
     int min_cnt, int min_sc, float chn_pen_gap, float chn_pen_skip, int is_cdna,
@@ -159,6 +158,8 @@ mm128_t *mg_lchain_dp(
 	int64_t *p, i, j, max_ii; // NOTE: max_ii: the anchor idx that holds max score on the chain
 	int64_t st = 0, n_iter = 0; // NOTE: n_iter: scores calculated
 	uint64_t *u;
+
+	max_skip = INT32_MAX; // FIXME: no skip limitation for test purpose
 
     if (_u) *_u = 0, *n_u_ = 0;
 	if (n == 0 || a == 0) {
@@ -173,8 +174,11 @@ mm128_t *mg_lchain_dp(
 	KMALLOC(km, v, n); // NOTE: max score upto i
 	KCALLOC(km, t, n); // NOTE: used to track if it is a predecessor of an anchor already chained to
 
+	#ifdef DEBUG_INPUT
 	debug_chain_input(a, n, max_iter, max_dist_x, max_dist_y, max_skip,\ 
                         bw, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
+	#endif // DEBUG_INPUT
+
 	// fill the score and backtrack arrays
 	for (i = 0, max_ii = -1; i < n; ++i) { 
 		// NOTE: iterate through all the anchors. i: current anchor idx
@@ -229,9 +233,9 @@ mm128_t *mg_lchain_dp(
 	u = mg_chain_backtrack(km, n, f, p, v, t, min_cnt, min_sc, max_drop, &n_u, &n_v);
 	*n_u_ = n_u, *_u = u; // NB: note that u[] may not be sorted by score here
 
-	#ifdef DEBUG
-	debug_fprint(f, t, v, p, n);
-	#endif // DEBUG
+	#ifdef DEBUG_OUTPUT
+	debug_chain_output(f, t, v, p, n);
+	#endif // DEBUG_OUTPUT
 
 	kfree(km, p); kfree(km, f); kfree(km, t);
 	if (n_u == 0) {

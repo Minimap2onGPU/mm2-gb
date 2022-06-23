@@ -61,7 +61,8 @@
 
 #define MM_CIGAR_STR  "MIDNSHP=XB"
 
-#define DEBUG
+#define DEBUG_INPUT
+#define DEBUG_OUTPUT
 
 #ifdef __cplusplus
 extern "C" {
