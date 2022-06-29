@@ -11,6 +11,8 @@ extern "C" {
 #endif
 
 // debug functions
+void debug_chain_range(int64_t i, int64_t st);
+void debug_chain_range_end();
 void debug_print(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n);
 void debug_chain_output(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n);
 void debug_chain_result(int32_t n_u, uint64_t *u);

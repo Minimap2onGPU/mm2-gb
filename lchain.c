@@ -190,6 +190,7 @@ mm128_t *mg_lchain_dp(
             // NOTE: st: predecessor range start idx. 
 			++st;
 		if (i - st > max_iter) st = i - max_iter; 
+		debug_chain_range(i, st);
 		// even if distance satisfied, there shouldn't be too much anchors between
         // fprintf(pred_range_fptr, "%ld,", i - st);
         for (j = i - 1; j >= st; --j) {  // NOTE: j: predecessor idx
@@ -228,6 +229,7 @@ mm128_t *mg_lchain_dp(
 			max_ii = i;
 		if (mmax_f < max_f) mmax_f = max_f;
 	}
+	debug_chain_range_end();
 
 	// NOTE: t is not use, v is updated, f & p are inputs, n_u & n_v are outputs.
 	u = mg_chain_backtrack(km, n, f, p, v, t, min_cnt, min_sc, max_drop, &n_u, &n_v);

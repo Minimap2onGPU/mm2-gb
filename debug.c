@@ -5,7 +5,31 @@
 #include "mmpriv.h" // declare functions in this header
 
 const char *filename = "debug/chain_in_output";
+const char *rangename = "debug/range_pred";
 FILE *output = NULL;
+FILE *range_pred = NULL;
+
+void debug_chain_range(int64_t i, int64_t st) {
+    // print scores, predecessor, prepre to a file
+    if (range_pred == NULL) {
+        if ((range_pred = fopen(rangename, "w+")) == NULL) {
+            fprintf(stderr, "[Debug]: %s can't be opened\n", filename);
+            exit(0);
+        }
+    }
+    fprintf(range_pred, "%d,", i - st); // i-st = range 
+}
+
+void debug_chain_range_end() {
+    // print scores, predecessor, prepre to a file
+    if (range_pred == NULL) {
+        if ((range_pred = fopen(rangename, "w+")) == NULL) {
+            fprintf(stderr, "[Debug]: %s can't be opened\n", filename);
+            exit(0);
+        }
+    }
+    fprintf(range_pred, "\n"); // i-st = range 
+}
 
 void debug_print(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n) {
     printf("[Debug]: \n");
