@@ -10,10 +10,6 @@
 extern "C" {
 #endif
 
-// CUDA functions
-void range_selection();
-void forward_dp();
-
 // debug functions
 void debug_print(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n);
 void debug_chain_output(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n);

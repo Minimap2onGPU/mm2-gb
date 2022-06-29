@@ -1,11 +1,10 @@
-NVCC=		nvcc
 CFLAGS=		-g -Wall -O2 -Wc++-compat #-Wextra
 CUDAFLAGS=	-rdc=true -g -O2
 CPPFLAGS=	-DHAVE_KALLOC
 INCLUDES=
 OBJS=		kthread.o kalloc.o misc.o bseq.o sketch.o sdust.o options.o index.o \
 			lchain.o align.o hit.o seed.o map.o format.o pe.o esterr.o splitidx.o \
-			ksw2_ll_sse.o plchain.o debug.o # add new <file>.cuda/.c as file.o here
+			ksw2_ll_sse.o debug.o # add new <file>.cuda/.c as file.o here
 PROG=		minimap2
 PROG_EXTRA=	sdust minimap2-lite
 LIBS=		-lm -lz -lpthread
@@ -42,9 +41,6 @@ endif
 .c.o:
 		$(CC) -c $(CFLAGS) $(CPPFLAGS) $(INCLUDES) $< -o $@
 
-%.o:%.cu
-		$(NVCC) -c $(CUDAFLAGS) $(INCLUDES) $< -o $@
-
 all:$(PROG)
 
 extra:all $(PROG_EXTRA)
@@ -53,13 +49,8 @@ profile:CFLAGS += -pg -g3
 profile:all
 	perf record --call-graph=dwarf -e cycles:u time ./minimap2 -a test/MT-human.fa test/MT-orang.fa > test.sam
 
-# disable compilation with cc
-# minimap2:main.o libminimap2.a
-# 		$(CC) $(CFLAGS) main.o -o $@ -L. -lminimap2 $(LIBS)
-
-# compile with nvcc
 minimap2:main.o libminimap2.a
-		$(NVCC) $(CUDAFLAGS) main.o -o $@ -L. -lminimap2 $(LIBS) 
+		$(CC) $(CFLAGS) main.o -o $@ -L. -lminimap2 $(LIBS)
 
 minimap2-lite:example.o libminimap2.a
 		$(CC) $(CFLAGS) $< -o $@ -L. -lminimap2 $(LIBS)

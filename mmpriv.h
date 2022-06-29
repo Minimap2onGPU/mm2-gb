@@ -5,7 +5,7 @@
 #include "minimap.h"
 #include "bseq.h"
 #include "kseq.h"
-#include "plchain.h"
+#include "debug.h"
 
 
 #define MM_PARENT_UNSET   (-1)
