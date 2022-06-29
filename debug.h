@@ -13,9 +13,7 @@ extern "C" {
 // debug functions
 void debug_chain_range(int64_t i, int64_t st);
 void debug_chain_range_end();
-void debug_print(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n);
 void debug_chain_output(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n);
-void debug_chain_result(int32_t n_u, uint64_t *u);
 void debug_chain_input(mm128_t *a, int64_t n, int max_iter, int max_dist_x, int max_dist_y, int max_skip, int bw, float chn_pen_gap, float chn_pen_skip, int is_cdna, int n_seg);
 
 #ifdef __cplusplus

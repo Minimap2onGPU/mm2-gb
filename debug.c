@@ -17,7 +17,7 @@ void debug_chain_range(int64_t i, int64_t st) {
             exit(0);
         }
     }
-    fprintf(range_pred, "%d,", i - st); // i-st = range 
+    fprintf(range_pred, "%ld,", i - st); // i - st = range 
 }
 
 void debug_chain_range_end() {
@@ -29,13 +29,6 @@ void debug_chain_range_end() {
         }
     }
     fprintf(range_pred, "\n"); // i-st = range 
-}
-
-void debug_print(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n) {
-    printf("[Debug]: \n");
-    for (int i=0; i < n; ++i) {
-        printf("Anchor %d score: %d predecessor: %ld prepre: %d\n", i, f[i], p[i], t[i]);
-    }
 }
 
 void debug_chain_output(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n) {
@@ -52,21 +45,7 @@ void debug_chain_output(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t 
     }
 }
 
-void debug_chain_result(int32_t n_u, uint64_t *u) {
-    // print chains' info to a file
-    if (output == NULL) {
-        if ((output = fopen(filename, "w+")) == NULL) {
-            fprintf(stderr, "[Debug]: %s can't be opened\n", filename);
-            exit(0);
-        }
-    }
-    fprintf(output, "[Debug]: \n");
-    for (int i=0; i < n_u; ++i) {
-        fprintf(output, "Chain %d, score: %d, #anchors: %d\n", i, (int32_t)u[i]>>32, (int32_t)u[i]);
-    }
-}
-
-void debug_chain_input(mm128_t *a, int64_t n, int max_iter, int max_dist_x, int max_dist_y, int max_skip,\ 
+void debug_chain_input(mm128_t *a, int64_t n, int max_iter, int max_dist_x, int max_dist_y, int max_skip,\
                         int bw, float chn_pen_gap, float chn_pen_skip, int is_cdna, int n_seg) {
     if (output == NULL) {
         if ((output = fopen(filename, "w+")) == NULL) {
@@ -80,10 +59,6 @@ void debug_chain_input(mm128_t *a, int64_t n, int max_iter, int max_dist_x, int 
     for (int64_t i = 0; i < n; ++i) {
         fprintf(output, "%ld %lu %lu\n", i, a[i].x, a[i].y); // anchor idx, x, y
     }
-}
-
-void debug_chain_compute_sc(mm128_t *a, int64_t n, int max_dist_x, int max_iter) {
-
 }
 
 
