@@ -39,8 +39,14 @@ void debug_chain_output(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t 
             exit(0);
         }
     }
+
     fprintf(output, "[Debug]: \n");
     for (int i=0; i < n; ++i) {
+
+        if (p[i] >= 0 && i - p[i] > 5000){
+            fprintf(stderr, "Anchor %d score: %d predecessor: %ld\n",
+                    i, f[i], p[i], t[i]);
+        }
         fprintf(output, "Anchor %d score: %d predecessor: %ld prepre: %d\n", i, f[i], p[i], t[i]);
     }
 }

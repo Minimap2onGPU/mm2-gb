@@ -179,7 +179,9 @@ mm128_t *mg_lchain_dp(
                         bw, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
 	#endif // DEBUG_INPUT
 
-	// fill the score and backtrack arrays
+    int chain_to_peak_count = 0;
+
+    // fill the score and backtrack arrays
 	for (i = 0, max_ii = -1; i < n; ++i) { 
 		// NOTE: iterate through all the anchors. i: current anchor idx
 		int64_t max_j = -1, end_j;
@@ -224,18 +226,26 @@ mm128_t *mg_lchain_dp(
 		if (max_ii >= 0 && max_ii < end_j) {
 			int32_t tmp;
 			tmp = comput_sc(&a[i], &a[max_ii], max_dist_x, max_dist_y, bw, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
-			if (tmp != INT32_MIN && max_f < tmp + f[max_ii])
-				max_f = tmp + f[max_ii], max_j = max_ii;
+			if (tmp != INT32_MIN && max_f < tmp + f[max_ii]){
+                    fprintf(
+                        stderr,
+                        "Anchor %d, max_f %d, max_j %ld, tmp %d, f[max_ii] %d, max_ii %ld, \n", i, max_f, max_j, tmp, f[max_ii], max_ii);
+                    chain_to_peak_count++;
+                    max_f = tmp + f[max_ii], max_j = max_ii;
+            }
 		}
 		f[i] = max_f, p[i] = max_j;
-		v[i] = max_j >= 0 && v[max_j] > max_f? v[max_j] : max_f; // v[] keeps the peak score up to i; f[] is the score ending at i, not always the peak
+        v[i] = max_j >= 0 && v[max_j] > max_f? v[max_j] : max_f; // v[] keeps the peak score up to i; f[] is the score ending at i, not always the peak
 		if (max_ii < 0 || (a[i].x - a[max_ii].x <= (int64_t)max_dist_x && f[max_ii] < f[i]))
 			max_ii = i;
 		if (mmax_f < max_f) mmax_f = max_f;
-	}
-	#ifdef DEBUG_RANGE
-	debug_chain_range_end();	
-	#endif // DEBUG_RANGE
+
+
+    }
+#ifdef DEBUG_RANGE
+	debug_chain_range_end();
+
+#endif // DEBUG_RANGE
 
 	// NOTE: t is not use, v is updated, f & p are inputs, n_u & n_v are outputs.
 	u = mg_chain_backtrack(km, n, f, p, v, t, min_cnt, min_sc, max_drop, &n_u, &n_v);
@@ -243,7 +253,12 @@ mm128_t *mg_lchain_dp(
 
 	#ifdef DEBUG_OUTPUT
 	debug_chain_output(f, t, v, p, n);
-	#endif // DEBUG_OUTPUT
+    if (chain_to_peak_count > 0) {
+        fprintf(stderr,
+                "============= Read Contains anchors chained to peak score "
+                "====================\n");
+    }
+#endif // DEBUG_OUTPUT
 
 	kfree(km, p); kfree(km, f); kfree(km, t);
 	if (n_u == 0) {
