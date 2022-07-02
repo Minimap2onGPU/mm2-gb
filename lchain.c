@@ -227,11 +227,12 @@ mm128_t *mg_lchain_dp(
 			int32_t tmp;
 			tmp = comput_sc(&a[i], &a[max_ii], max_dist_x, max_dist_y, bw, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
 			if (tmp != INT32_MIN && max_f < tmp + f[max_ii]){
-                    fprintf(
-                        stderr,
-                        "Anchor %d, max_f %d, max_j %ld, tmp %d, f[max_ii] %d, max_ii %ld, \n", i, max_f, max_j, tmp, f[max_ii], max_ii);
-                    chain_to_peak_count++;
-                    max_f = tmp + f[max_ii], max_j = max_ii;
+                fprintf(stderr,
+                        "Anchor %d, max_f %d, max_j %ld, tmp %d, f[max_ii] %d, "
+                        "max_ii %ld, st %ld\n",
+                        i, max_f, max_j, tmp, f[max_ii], max_ii, st);
+                chain_to_peak_count++;
+                max_f = tmp + f[max_ii], max_j = max_ii;
             }
 		}
 		f[i] = max_f, p[i] = max_j;
