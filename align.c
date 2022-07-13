@@ -354,16 +354,16 @@ static void mm_align_pair(void *km, const mm_mapopt_t *opt, int qlen, const uint
 		if (!align_in_file) {
 			printf("0\n");
 			align_in_file = fopen("debug/align.input", "w");
-			fprintf(align_in_file, "tlen\tqlen\tq\tq2\te\te2\tw\tzdrop\tend_bonus\tflag\n");
+			fprintf(align_in_file, "a\tb\tsc_ambi\ttlen\tqlen\tq\tq2\te\te2\tw\tzdrop\tend_bonus\tflag\n");
 		}
 
-		if (debug_count < DEBUG_NUM) {
-			fprintf(align_in_file, "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", tlen, qlen, opt->q, opt->q2, opt->e, opt->e2, w, opt->zdrop, end_bonus, flag);
+		//if (debug_count < DEBUG_NUM) {
+			fprintf(align_in_file, "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", opt->a, opt->b, opt->sc_ambi, tlen, qlen, opt->q, opt->q2, opt->e, opt->e2, w, opt->zdrop, end_bonus, flag);
 			for (int i = 0; i < tlen; ++i) fputc("ACGTN"[tseq[i]], align_in_file);
 			fputc('\n', align_in_file);
 			for (int i = 0; i < qlen; ++i) fputc("ACGTN"[qseq[i]], align_in_file);
 			fputc('\n', align_in_file);
-		}
+		//}
 
 		print_flag = 1;
 		ksw_extd2_sse(km, qlen, qseq, tlen, tseq, 5, mat, opt->q, opt->e, opt->q2, opt->e2, w, zdrop, end_bonus, flag, ez);
@@ -373,12 +373,12 @@ static void mm_align_pair(void *km, const mm_mapopt_t *opt, int qlen, const uint
 			printf("1\n");
 			align_cigar_file = fopen("debug/align_cigar.output", "w");
 		}
-		if (debug_count < DEBUG_NUM) {
+		//if (debug_count < DEBUG_NUM) {
 			fprintf(align_cigar_file, "%d\n", ez->n_cigar);
 			for (int i = 0; i < ez->n_cigar; ++i)
 				fprintf(align_cigar_file, "%d%c", ez->cigar[i]>>4, MM_CIGAR_STR[ez->cigar[i]&0xf]);
 			fprintf(align_cigar_file, "\n");
-		}
+		//}
 
 		debug_count++;
 	}

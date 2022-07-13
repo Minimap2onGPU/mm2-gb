@@ -167,6 +167,14 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 		}
 		st0 = st, en0 = en;
 		st = st / 16 * 16, en = (en + 16) / 16 * 16 - 1;
+
+		// Checkpoint 1
+		// st, en
+		if (debug_count < DEBUG_NUM) {
+			printf("### r = %d ###\n", r);
+			printf("C1:\nst=%d, en=%d\n\n", st0, en0);
+		}
+
 		// set boundary conditions
 		if (st > 0) {
 			if (st - 1 >= last_st && st - 1 <= last_en) {
@@ -210,6 +218,32 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 		v1_  = _mm_cvtsi32_si128((uint8_t)v1);
 		st_ = st / 16, en_ = en / 16;
 		assert(en_ - st_ + 1 <= n_col_);
+
+		// Checkpoint 2
+		// x1, x21, v1, s[st..en]
+		// if (en >= r) y[r], y2[r], u[r]
+		if (debug_count < DEBUG_NUM) {
+			printf("C2:\n");
+			printf("x1=%d, x21=%d, v1=%d\n", x1, x21, v1);
+			printf("s[st:en]=\n");
+			for (t=st0; t<=en0; ++t) printf("%d ", ((int8_t*)s)[t]);
+			printf("\n");
+			printf("u[st:en]=\n");
+			for (t=st0; t<=en0; ++t) printf("%d ", ((int8_t*)u)[t]);
+			printf("\n");
+			printf("v[st:en]=\n");
+			for (t=st0; t<=en0; ++t) printf("%d ", ((int8_t*)v)[t]);
+			printf("\n");
+			printf("x[st:en]=\n");
+			for (t=st0; t<=en0; ++t) printf("%d ", ((int8_t*)x)[t]);
+			printf("\n");
+			printf("y[st:en]=\n");
+			for (t=st0; t<=en0; ++t) printf("%d ", ((int8_t*)y)[t]);
+			printf("\n");
+			if (en >= r) printf("y[r]=%d, y2[r]=%d, u[r]=%d\n", ((int8_t*)y)[r], ((int8_t*)y2)[r], u8[r]);
+			printf("\n");
+		}
+
 		if (!with_cigar) { // score only
 			for (t = st_; t <= en_; ++t) {
 				__m128i z, a, b, a2, b2, xt1, x2t1, vt1, ut, tmp;
@@ -298,8 +332,10 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 			__m128i *pr = p + (size_t)r * n_col_ - st_;
 			off[r] = st, off_end[r] = en;
 			for (t = st_; t <= en_; ++t) {
+				if (debug_count < DEBUG_NUM) printf("1 %d %d\n", ((int8_t*)v)[15], ((int8_t*)v)[16]);
 				__m128i d, z, a, b, a2, b2, xt1, x2t1, vt1, ut, tmp;
 				__dp_code_block1;
+				if (debug_count < DEBUG_NUM) printf("2 %d %d\n", ((int8_t*)v)[15], ((int8_t*)v)[16]);
 #ifdef __SSE4_1__
 				d = _mm_andnot_si128(_mm_cmpgt_epi8(z, a), _mm_set1_epi8(1));    // d = z > a?  0 : 1
 				z = _mm_max_epi8(z, a);
@@ -326,7 +362,9 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 				tmp = _mm_cmplt_epi8(sc_mch_, z);
 				z = _mm_or_si128(_mm_and_si128(tmp, sc_mch_), _mm_andnot_si128(tmp, z));
 #endif
+				if (debug_count < DEBUG_NUM) printf("3 %d %d\n", ((int8_t*)v)[15], ((int8_t*)v)[16]);
 				__dp_code_block2;
+				if (debug_count < DEBUG_NUM) printf("4 %d %d\n", ((int8_t*)v)[15], ((int8_t*)v)[16]);
 				tmp = _mm_cmpgt_epi8(zero_, a);
 				_mm_store_si128(&x[t],  _mm_sub_epi8(_mm_andnot_si128(tmp, a),  qe_));
 				d = _mm_or_si128(d, _mm_andnot_si128(tmp, _mm_set1_epi8(0x08))); // d = a > 0? 1<<3 : 0
@@ -340,8 +378,10 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 				_mm_store_si128(&y2[t], _mm_sub_epi8(_mm_andnot_si128(tmp, b2), qe2_));
 				d = _mm_or_si128(d, _mm_andnot_si128(tmp, _mm_set1_epi8(0x40))); // d = b > 0? 1<<6 : 0
 				_mm_store_si128(&pr[t], d);
+				if (debug_count < DEBUG_NUM) printf("5 %d %d\n", ((int8_t*)v)[15], ((int8_t*)v)[16]);
 			}
 		}
+		/*
 		if (!approx_max) { // find the exact max with a 32-bit score array
 			int32_t max_H, max_t;
 			// compute H[], max_H and max_t
@@ -402,17 +442,17 @@ void ksw_extd2_sse(void *km, int qlen, const uint8_t *query, int tlen, const uin
 			if ((flag & KSW_EZ_APPROX_DROP) && ksw_apply_zdrop(ez, 1, H0, r, last_H0_t, zdrop, e2)) break;
 			if (r == qlen + tlen - 2 && en0 == tlen - 1)
 				ez->score = H0;
-		}
+		}*/
 		last_st = st, last_en = en;
 
-		if (print_flag && debug_count < DEBUG_NUM) {
-			// Debug output
-			for (t = st0; t <= en0; ++t) {
-				fprintf(align_score_file, "(%d,%d|%d,%d,%d,%d)", r, t, ((int8_t*)u)[t], ((int8_t*)v)[t], ((int8_t*)x)[t], ((int8_t*)y)[t]); // for debugging
-			}
-			fprintf(align_score_file, "\n");
-			// fprintf(align_score_file, "%d %d\n", tlen, qlen);
-		}
+		// if (print_flag && debug_count < DEBUG_NUM) {
+		// 	// Debug output
+		// 	for (t = st0; t <= en0; ++t) {
+		// 		fprintf(align_score_file, "(%d,%d|%d,%d,%d,%d)", r, t, ((int8_t*)u)[t], ((int8_t*)v)[t], ((int8_t*)x)[t], ((int8_t*)y)[t]); // for debugging
+		// 	}
+		// 	fprintf(align_score_file, "\n");
+		// 	// fprintf(align_score_file, "%d %d\n", tlen, qlen);
+		// }
 	}
 	kfree(km, mem);
 	if (!approx_max) kfree(km, H);

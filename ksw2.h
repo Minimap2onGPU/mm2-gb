@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define DEBUG_NUM 100
+#define DEBUG_NUM 1
 
 #define KSW_NEG_INF -0x40000000
 
