@@ -217,13 +217,15 @@ mm128_t *mg_lchain_dp(
         end_j = j;
 
 		// NOTE: update max_ii (idx of anchor that holds peak score)
-		if (max_ii < 0 || a[i].x - a[max_ii].x > (int64_t)max_dist_x) {
-			int32_t max = INT32_MIN;
+        if (max_ii < 0 ||
+            a[i].x << 32 != a[max_ii].x << 32 || a[i].x - a[max_ii].x >
+                (int64_t)max_dist_x) {
+            int32_t max = INT32_MIN;
 			max_ii = -1;
-			for (j = i - 1; j >= st; --j)
-				if (max < f[j]) max = f[j], max_ii = j;
-		}
-		if (max_ii >= 0 && max_ii < end_j) {
+            for (j = i - 1; j >= 0 && a[j].x << 32 == a[i].x << 32 && a[j].x + (int64_t)max_dist_x >= a[i].x ; --j)
+                if (max < f[j]) max = f[j], max_ii = j;
+        }
+        if (max_ii >= 0 && max_ii < end_j) {
 			int32_t tmp;
 			tmp = comput_sc(&a[i], &a[max_ii], max_dist_x, max_dist_y, bw, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
 			if (tmp != INT32_MIN && max_f < tmp + f[max_ii]){
