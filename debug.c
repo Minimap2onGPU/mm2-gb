@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <assert.h>
 #include "mmpriv.h" // declare functions in this header
+#include "debug.h"
+#include "plchain.h"
+#include <time.h>
 
 const char *filename = "debug/chain_in_output";
 FILE *output = NULL;

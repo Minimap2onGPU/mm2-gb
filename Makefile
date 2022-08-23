@@ -1,14 +1,40 @@
-NVCC=		nvcc
+GPU?= 		AMD
 CFLAGS=		-g -Wall -O2 -Wc++-compat #-Wextra
-CUDAFLAGS=	-rdc=true -g -O2
 CPPFLAGS=	-DHAVE_KALLOC
 INCLUDES=
 OBJS=		kthread.o kalloc.o misc.o bseq.o sketch.o sdust.o options.o index.o \
 			lchain.o align.o hit.o seed.o map.o format.o pe.o esterr.o splitidx.o \
-			ksw2_ll_sse.o plchain.o debug.o # add new <file>.cuda/.c as file.o here
+			ksw2_ll_sse.o plmem.o plrange.o plscore.o debug.o # add new <file>.cuda/.c as file.o here
 PROG=		minimap2
 PROG_EXTRA=	sdust minimap2-lite
 LIBS=		-lm -lz -lpthread
+
+###################################################
+############  	CUDA Compile 	###################
+###################################################
+NVCC 			= nvcc
+CUDAFLAGS		= -rdc=true -O2
+CUDATESTFLAG	= -G
+
+###################################################
+############	HIP Compile		###################
+###################################################
+HIPCC			= hipcc
+HIPFLAGS		= -DUSEHIP
+HIPTESTFLAGS	= -g
+
+###################################################
+############	DEBUG Options	###################
+###################################################
+check: CFLAGS += -DDEBUG_CHECK
+check: HIPFLAGS += -DDEBUG_CHECK
+check: CUDAFLAGS += -DDEBUG_CHECK
+check: HIPFLAGS += $(HIPTESTFLAGS)
+check: CUDAFLAGS += $(CUDATESTFLAG)
+
+verbose: CFLAGS += -DDEBUG_VERBOSE
+verbose: HIPFLAGS += -DDEBUG_VERBOSE
+verbose: CUDAFLAGS += -DDEBUG_VERBOSE
 
 ifeq ($(arm_neon),) # if arm_neon is not defined
 ifeq ($(sse2only),) # if sse2only is not defined
@@ -42,12 +68,20 @@ endif
 .c.o:
 		$(CC) -c $(CFLAGS) $(CPPFLAGS) $(INCLUDES) $< -o $@
 
-%.o:%.cu
-		$(NVCC) -c $(CUDAFLAGS) $(INCLUDES) $< -o $@
+%.o: %.cu
+ifeq ($(GPU), AMD)
+		$(HIPCC) -c $(HIPFLAGS) $< -o $@
+else
+		$(NVCC) -c $(CUDAFLAGS) $< -o $@
+endif
 
 all:$(PROG)
 
 extra:all $(PROG_EXTRA)
+
+# check: $(PROG)
+
+# verbose: check
 
 profile:CFLAGS += -pg -g3
 profile:all
@@ -57,15 +91,21 @@ profile:all
 # minimap2:main.o libminimap2.a
 # 		$(CC) $(CFLAGS) main.o -o $@ -L. -lminimap2 $(LIBS)
 
-# compile with nvcc
+# compile with nvcc/hipcc
 minimap2:main.o libminimap2.a
+ifeq ($(GPU), AMD)
+		$(info compile with HIP)
+		$(HIPCC) $(HIPFLAGS) main.o -o $@ -L. -lminimap2 $(LIBS) 
+else
+		$(info compile with CUDA)
 		$(NVCC) $(CUDAFLAGS) main.o -o $@ -L. -lminimap2 $(LIBS) 
+endif
 
 minimap2-lite:example.o libminimap2.a
 		$(CC) $(CFLAGS) $< -o $@ -L. -lminimap2 $(LIBS)
 
 libminimap2.a:$(OBJS)
-		$(AR) -csru $@ $(OBJS)
+		$(AR) -csr $@ $(OBJS)
 
 sdust:sdust.c kalloc.o kalloc.h kdq.h kvec.h kseq.h ketopt.h sdust.h
 		$(CC) -D_SDUST_MAIN $(CFLAGS) $< kalloc.o -o $@ -lz
