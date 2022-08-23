@@ -41,11 +41,11 @@ void debug_chain_result(int32_t n_u, uint64_t *u) {
     }
     fprintf(output, "[Debug]: \n");
     for (int i=0; i < n_u; ++i) {
-        fprintf(output, "Chain %d, score: %d, #anchors: %d\n", i, (int32_t)u[i]>>32, (int32_t)u[i]);
+        fprintf(output, "Chain %d, score: %d, #anchors: %d\n", i, (int32_t)(u[i]>>32), (int32_t)u[i]);
     }
 }
 
-void debug_chain_input(mm128_t *a, int64_t n, int max_iter, int max_dist_x, int max_dist_y, int max_skip,\ 
+void debug_chain_input(mm128_t *a, int64_t n, int max_iter, int max_dist_x, int max_dist_y, int max_skip,\
                         int bw, float chn_pen_gap, float chn_pen_skip, int is_cdna, int n_seg) {
     if (output == NULL) {
         if ((output = fopen(filename, "w+")) == NULL) {
