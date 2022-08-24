@@ -185,7 +185,7 @@ mm128_t *mg_lchain_dp(
 		int64_t max_j = -1, end_j;
 		int32_t max_f = a[i].y>>32&0xff, n_skip = 0; // NOTE: max_f: q_span(w), serve as the minimum for chaining score
         while (st < i && 
-				(a[i].x >> 32 != a[st].x >> 32 // NOTE: ???
+				(a[i].x >> 32 != a[st].x >> 32 // NOTE: ????
 				|| a[i].x > a[st].x + max_dist_x))
             // NOTE: st: predecessor range start idx. 
 			++st;
