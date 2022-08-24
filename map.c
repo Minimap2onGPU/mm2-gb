@@ -281,6 +281,7 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 		a = mg_lchain_rmq(opt->max_gap, opt->rmq_inner_dist, opt->bw, opt->max_chain_skip, opt->rmq_size_cap, opt->min_cnt, opt->min_chain_score,
 						  chn_pen_gap, chn_pen_skip, n_a, a, &n_regs0, &u, b->km);
 	} else {
+		// NOTE: chaining first called here
 		a = mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
 						 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
 	}
@@ -315,6 +316,7 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 			kfree(b->km, mini_pos);
 			if (opt->flag & MM_F_HEAP_SORT) a = collect_seed_hits_heap(b->km, opt, opt->max_occ, mi, qname, &mv, qlen_sum, &n_a, &rep_len, &n_mini_pos, &mini_pos);
 			else a = collect_seed_hits(b->km, opt, opt->max_occ, mi, qname, &mv, qlen_sum, &n_a, &rep_len, &n_mini_pos, &mini_pos);
+			// NOTE: chaining second called here
 			a = mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
 							 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
 		}
@@ -379,7 +381,8 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 }
 
 mm_reg1_t *mm_map(const mm_idx_t *mi, int qlen, const char *seq, int *n_regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname)
-{
+{ 
+	// NOTE: this is no longer called
 	mm_reg1_t *regs;
 	mm_map_frag(mi, 1, &qlen, &seq, n_regs, &regs, b, opt, qname);
 	return regs;
@@ -413,6 +416,7 @@ typedef struct {
 
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
 {
+	// NOTE: mm_map called from here -> chaining
     step_t *s = (step_t*)_data;
 	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
 	const char *qseqs[MM_MAX_SEG];
@@ -557,7 +561,9 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			return s;
 		} else free(s);
     } else if (step == 1) { // step 1: map
+		fprintf(stderr, "[M: %s] kt_for %d segs\n", __func__, ((step_t*)in)->n_frag);
 		if (p->n_parts > 0) merge_hits((step_t*)in);
+		// NOTE: allocate threads for worker
 		else kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
 		return in;
     } else if (step == 2) { // step 2: output

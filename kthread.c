@@ -51,13 +51,15 @@ static void *ktf_worker(void *data)
 	pthread_exit(0);
 }
 
+#include <stdio.h>
+
 void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n)
 {
-	// DEBUG: force to run on only one thread
+	fprintf(stderr, "[M: %s] kt_for %ld segs\n", __func__, n);
     n_threads = 1; // FIXME: comment this to enable multithread
     if (n_threads > 1) {
         int i;
-		kt_for_t t;
+		kt_for_t t; // NOTE: multithreads' metadata
 		pthread_t *tid;
 		t.func = func, t.data = data, t.n_threads = n_threads, t.n = n;
 		t.w = (ktf_worker_t*)calloc(n_threads, sizeof(ktf_worker_t));
@@ -97,10 +99,10 @@ typedef struct ktp_t {
 } ktp_t;
 
 static void *ktp_worker(void *data)
-{
+{	// NOTE: called from kt_pipeline
 	ktp_worker_t *w = (ktp_worker_t*)data;
 	ktp_t *p = w->pl;
-	while (w->step < p->n_steps) {
+	while (w->step < p->n_steps) { // NOTE: stop when all steps is done
 		// test whether we can kick off the job with this worker
 		pthread_mutex_lock(&p->mutex);
 		for (;;) {
@@ -116,12 +118,14 @@ static void *ktp_worker(void *data)
 		}
 		pthread_mutex_unlock(&p->mutex);
 
-		// working on w->step
+		// NOTE: working on w->step
+		fprintf(stderr, "[M: %s] ktp_worker on step %d\n", __func__, w->step);
 		w->data = p->func(p->shared, w->step, w->step? w->data : 0); // for the first step, input is NULL
 
 		// update step and let other workers know
 		pthread_mutex_lock(&p->mutex);
-		w->step = w->step == p->n_steps - 1 || w->data? (w->step + 1) % p->n_steps : p->n_steps;
+		// NOTE: stop pipeline when step = n_steps-1 and data is empty, step 1 is mapping
+		w->step = ((w->step == p->n_steps - 1) || w->data) ? ((w->step + 1) % p->n_steps) : p->n_steps;
 		if (w->step == 0) w->index = p->index++;
 		pthread_cond_broadcast(&p->cv);
 		pthread_mutex_unlock(&p->mutex);

@@ -175,7 +175,7 @@ mm128_t *mg_lchain_dp(
 	KCALLOC(km, t, n); // NOTE: used to track if it is a predecessor of an anchor already chained to
 
 	#ifdef DEBUG_INPUT
-	debug_chain_input(a, n, max_iter, max_dist_x, max_dist_y, max_skip,\ 
+	debug_chain_input(a, n, max_iter, max_dist_x, max_dist_y, max_skip,\
                         bw, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
 	#endif // DEBUG_INPUT
 
