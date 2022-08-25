@@ -42,7 +42,8 @@ static void *ktf_worker(void *data)
 	ktf_worker_t *w = (ktf_worker_t*)data;
 	long i;
 	for (;;) {
-		i = __sync_fetch_and_add(&w->i, w->t->n_threads);
+		i = __sync_fetch_and_add(&w->i, w->t->n_threads); // NOTE: atomic add, i starts from thread_idx
+		// FIXME: why atomic add is necessary here
 		if (i >= w->t->n) break;
 		w->t->func(w->t->data, i, w - w->t->w);
 	}
