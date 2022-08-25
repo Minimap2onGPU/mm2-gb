@@ -55,7 +55,7 @@ static void *ktf_worker(void *data)
 
 void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n)
 {	
-	// NOTE: func = worker_for, n_threads is input of mm_map_file_frag()
+	// NOTE: func = worker_for, n_threads is input of mm_map_file_frag(), n is number of frags
     // n_threads = 1; // FIXME: comment this to enable multithread
 	fprintf(stderr, "[M: %s] kt_for %ld segs on %d threads\n", __func__, n, n_threads);
     if (n_threads > 1) {
