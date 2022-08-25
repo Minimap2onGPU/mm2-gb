@@ -191,7 +191,6 @@ mm128_t *mg_lchain_dp(
 			++st;
 		if (i - st > max_iter) st = i - max_iter; 
 		// even if distance satisfied, there shouldn't be too much anchors between
-        // fprintf(pred_range_fptr, "%ld,", i - st);
         for (j = i - 1; j >= st; --j) {  // NOTE: j: predecessor idx
             int32_t sc; 
 			sc = comput_sc(&a[i], &a[j], max_dist_x, max_dist_y, bw, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);

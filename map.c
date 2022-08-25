@@ -529,6 +529,7 @@ static void merge_hits(step_t *s)
 
 static void *worker_pipeline(void *shared, int step, void *in)
 {
+	// NOTE: called from ktp_worker
 	int i, j, k;
     pipeline_t *p = (pipeline_t*)shared;
     if (step == 0) { // step 0: read sequences
@@ -561,9 +562,9 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			return s;
 		} else free(s);
     } else if (step == 1) { // step 1: map
-		fprintf(stderr, "[M: %s] kt_for %d segs\n", __func__, ((step_t*)in)->n_frag);
+		fprintf(stderr, "[M: %s] kt_for %d segs %d parts\n", __func__, ((step_t*)in)->n_frag, p->n_parts);
 		if (p->n_parts > 0) merge_hits((step_t*)in);
-		// NOTE: allocate threads for worker
+		// NOTE: allocate threads for worker, n_threads is input of mm_map_file_frag()
 		else kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
 		return in;
     } else if (step == 2) { // step 2: output
@@ -658,7 +659,7 @@ int mm_map_file_frag(const mm_idx_t *idx, int n_segs, const char **fn, const mm_
 	pl.mini_batch_size = opt->mini_batch_size;
 	if (opt->split_prefix)
 		pl.fp_split = mm_split_init(opt->split_prefix, idx);
-	pl_threads = n_threads == 1? 1 : (opt->flag&MM_F_2_IO_THREADS)? 3 : 2;
+	pl_threads = n_threads == 1? 1 : ((opt->flag&MM_F_2_IO_THREADS)? 3 : 2);
 	kt_pipeline(pl_threads, worker_pipeline, &pl, 3); /* make workload, pipeline */
 
 	free(pl.str.s);
@@ -671,6 +672,7 @@ int mm_map_file_frag(const mm_idx_t *idx, int n_segs, const char **fn, const mm_
 
 int mm_map_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, int n_threads)
 {
+	fprintf(stderr, "[M: %s], map file %s\n", __func__, fn);
 	return mm_map_file_frag(idx, 1, &fn, opt, n_threads);
 }
 

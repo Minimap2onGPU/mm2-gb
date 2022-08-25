@@ -54,9 +54,10 @@ static void *ktf_worker(void *data)
 #include <stdio.h>
 
 void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n)
-{
-	fprintf(stderr, "[M: %s] kt_for %ld segs\n", __func__, n);
-    n_threads = 1; // FIXME: comment this to enable multithread
+{	
+	// NOTE: func = worker_for, n_threads is input of mm_map_file_frag()
+    // n_threads = 1; // FIXME: comment this to enable multithread
+	fprintf(stderr, "[M: %s] kt_for %ld segs on %d threads\n", __func__, n, n_threads);
     if (n_threads > 1) {
         int i;
 		kt_for_t t; // NOTE: multithreads' metadata
@@ -119,14 +120,15 @@ static void *ktp_worker(void *data)
 		pthread_mutex_unlock(&p->mutex);
 
 		// NOTE: working on w->step
-		fprintf(stderr, "[M: %s] ktp_worker on step %d\n", __func__, w->step);
-		w->data = p->func(p->shared, w->step, w->step? w->data : 0); // for the first step, input is NULL
+		fprintf(stderr, "[M: %s] ktp_worker %ld on step %d\n", __func__, w->index, w->step);
+		w->data = p->func(p->shared, w->step, w->step? w->data : 0); // NOTE: for the first step, input is NULL, enter worker_pipeline()
+		fprintf(stderr, "[M: %s] ktp_worker %ld done step %d\n", __func__, w->index, w->step);
 
 		// update step and let other workers know
 		pthread_mutex_lock(&p->mutex);
 		// NOTE: stop pipeline when step = n_steps-1 and data is empty, step 1 is mapping
 		w->step = ((w->step == p->n_steps - 1) || w->data) ? ((w->step + 1) % p->n_steps) : p->n_steps;
-		if (w->step == 0) w->index = p->index++;
+		if (w->step == 0) w->index = p->index++; // NOTE: index increase after finish n_steps
 		pthread_cond_broadcast(&p->cv);
 		pthread_mutex_unlock(&p->mutex);
 	}
@@ -136,6 +138,7 @@ static void *ktp_worker(void *data)
 // n_steps = 3, func = worker_pipeline, n_threads = (at most) 3
 void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps)
 {
+	// NOTE: called from mm_map_file_frag
 	ktp_t aux;
 	pthread_t *tid;
 	int i;
@@ -144,7 +147,7 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_d
 	aux.n_workers = n_threads;
 	aux.n_steps = n_steps;
 	aux.func = func;
-	aux.shared = shared_data;
+	aux.shared = shared_data; // include n_threads in kt_for
 	aux.index = 0;
 	pthread_mutex_init(&aux.mutex, 0);
 	pthread_cond_init(&aux.cv, 0);
@@ -155,9 +158,10 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_d
 		w->step = 0; w->pl = &aux; w->data = 0;
 		w->index = aux.index++;
 	}
+	fprintf(stderr, "[M: %s] pl_threads %d, max_aux_index %ld\n", __func__, n_threads, aux.index);
 
 	tid = (pthread_t*)calloc(n_threads, sizeof(pthread_t));
-	for (i = 0; i < n_threads; ++i) pthread_create(&tid[i], 0, ktp_worker, &aux.workers[i]);
+	for (i = 0; i < n_threads; ++i) pthread_create(&tid[i], 0, ktp_worker, &aux.workers[i]); // NOTE: aux go to worker_pipeline
 	for (i = 0; i < n_threads; ++i) pthread_join(tid[i], 0);
 	free(tid); free(aux.workers);
 
