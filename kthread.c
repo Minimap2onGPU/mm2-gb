@@ -29,6 +29,7 @@ typedef struct kt_for_t {
 
 static inline long steal_work(kt_for_t *t)
 {
+	// NOTE: check if other thread is lagging behind and do its future work
 	int i, min_i = -1;
 	long k, min = LONG_MAX;
 	for (i = 0; i < t->n_threads; ++i)

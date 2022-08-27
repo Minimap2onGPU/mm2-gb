@@ -6,7 +6,7 @@
 #include "bseq.h"
 #include "kseq.h"
 #include "hipify.h"
-#include "utils.h"
+#include "plutils.h"
 
 #ifdef __cplusplus
 extern "C" {
