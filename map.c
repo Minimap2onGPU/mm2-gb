@@ -573,13 +573,17 @@ static void *worker_pipeline(void *shared, int step, void *in)
 				}
 			return s;
 		} else free(s);
-    } else if (step == 1) { // step 1: map
+    } else if (step == 1) { // step 1: seeding + append chaining tasks
 		fprintf(stderr, "[M: %s] kt_for %d segs %d parts\n", __func__, ((step_t*)in)->n_frag, p->n_parts);
 		if (p->n_parts > 0) merge_hits((step_t*)in);
 		// NOTE: allocate threads for worker, n_threads is input of mm_map_file_frag()
 		else kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
 		return in;
-    } else if (step == 2) { // step 2: output
+	} else if (step == 2) { // step 2: check if chaining is done (do backtracking)
+	
+	} else if (step == 3) { // step 3: check if alignment is done 
+
+    } else if (step == 4) { // step 4: output
 		void *km = 0;
         step_t *s = (step_t*)in;
 		const mm_idx_t *mi = p->mi;
