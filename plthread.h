@@ -13,7 +13,7 @@ extern "C" {
 #endif
 
 
-
+int mg_plchain_dp();
 
 
 

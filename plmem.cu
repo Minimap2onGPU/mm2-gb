@@ -2,16 +2,90 @@
 #include <string.h>
 #include <stdio.h>
 #include <assert.h>
-#include "plchain.h"
-#include "debug.h"
 #include <time.h>
 
+#include "plchain.h"
+#include "plthread.h"
+#include "debug.h"
+
 /*
-
-    static variables 
-    chaining task list
-
+    chaining task types and task lists
 */
+
+enum Status {
+    IDLE,
+    TASK_ON,
+    TASK_END,
+};
+
+struct task_chain_t {
+    int64_t *a;
+	int index; // index where anchors were appended to and where to find f, p 
+    int size; // batch size
+    Status status; // status of the task
+};
+
+struct task_alignment_t {
+	// FIXME: waiting to be filled
+    Status status; // status of the task
+};
+
+static task_chain_t *chaining_tasks;
+static task_alignment_t *alignment_tasks;
+static int64_t chain_index; // += size for every chaining task
+static int64_t align_index; // += size for every alignment task
+static bool gpu_busy;
+
+int pltask_init() {
+    // TODO: compute gpu memory size and initialize the tasks list 
+    
+}
+
+/*********************** Thread function calls start ************************/
+
+int plchain_append() {
+
+    // TODO: increment the index 
+    // NOTE: No consistence violation as sequence index on each cpu thread is independent
+
+    return 0;
+}
+
+int plchain_check(size_t index) {
+
+    Status status = chaining_tasks[index].status;
+    switch (status)
+    {
+    case IDLE:
+        // TODO: start gpu if gpu_busy is false
+        // change gpu_busy to true
+        return -1;
+
+    case TASK_ON:
+        return 1;
+
+    case TASK_END:
+        // TODO: misc after gpu is done
+        return 0;
+    default:
+        break;
+    }
+
+
+    return 0; 
+    // TODO: return 0 if gpu is done,
+    // return -1 if gpu just starts
+    // return 1 if gpu has start but not finished yet  
+}
+
+// TODO: alignment tasks append and check
+
+
+
+
+/*********************** Thread function calls end ************************/
+
+/*********************** GPU loops start ************************/
 
 double dynamic_stream_chain_loop(input_iter* input_arr, int total_reads) {
     // NOTE: return duration of this cpu batch
@@ -483,4 +557,6 @@ void stream_chain_loop(input_iter* input_arr, int total_iter) {
     // printf("[Stream chaining] ======Chaining Run Time: %lf secs\n", ((double) (clk_end - clk_start)) / CLOCKS_PER_SEC);
     return;
 }
+
+/*********************** GPU loops end ************************/
 
