@@ -13,12 +13,6 @@
 
 */
 
-int mg_plchain_dp() {
-
-
-
-}
-
 double dynamic_stream_chain_loop(input_iter* input_arr, int total_reads) {
     // NOTE: return duration of this cpu batch
     // NUM_STREAMS must be more than one

@@ -123,7 +123,7 @@ static void *ktp_worker(void *data)
 
 		// NOTE: working on w->step
 		fprintf(stderr, "[M: %s] ktp_worker %ld on step %d\n", __func__, w->index, w->step);
-		w->data = p->func(p->shared, w->step, w->step? w->data : 0); // NOTE: for the first step, input is NULL, enter worker_pipeline()
+		w->data = p->func(p->shared, w->step, w->step? w->data : 0); // NOTE: for the first step, input is NULL, enter worker_pipeline(), data->in
 		fprintf(stderr, "[M: %s] ktp_worker %ld done step %d\n", __func__, w->index, w->step);
 
 		// update step and let other workers know
