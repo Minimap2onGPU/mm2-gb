@@ -13,8 +13,9 @@ extern "C" {
 #endif
 
 
-int mg_plchain_dp();
-
+int pltask_init(int num_seqs);
+int plchain_append(long i, int64_t n_a);
+int plchain_check(long i);
 
 
 

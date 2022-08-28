@@ -20,10 +20,16 @@ enum Status {
 };
 
 struct task_chain_t {
-    int64_t *a;
-	int index; // index where anchors were appended to and where to find f, p 
+    int i; // index of the sequence 
+	int offset; // index where anchors were appended to and where to find f, p 
     int size; // batch size
     Status status; // status of the task
+    int max_chain_gap_qry, max_chain_gap_ref;
+    int rep_len, qlen_sum, n_regs0, n_mini_pos;
+	uint32_t hash;
+	uint64_t *u, *mini_pos;
+	mm128_t *a; // anchors data
+	mm128_v mv;
 };
 
 struct task_align_t {
@@ -43,11 +49,12 @@ int pltask_init(int num_seqs) {
     chain_index = align_index = 0;
     chaining_tasks = (task_chain_t *) malloc(sizeof(task_chain_t)*num_seqs);
     alignment_tasks = (task_align_t *) malloc(sizeof(task_align_t)*num_seqs);
+    return 0;
 }
 
 /*********************** Thread function calls start ************************/
 
-int plchain_append(int64_t n_a) {
+int plchain_append(long i, int64_t n_a) {
 
     // TODO: increment the index 
     // NOTE: No consistence violation as sequence index on each cpu thread is independent
@@ -55,9 +62,9 @@ int plchain_append(int64_t n_a) {
     return 0;
 }
 
-int plchain_check(size_t index) {
+int plchain_check(long i) {
 
-    Status status = chaining_tasks[index].status;
+    Status status = chaining_tasks[i].status;
     switch (status)
     {
     case IDLE:

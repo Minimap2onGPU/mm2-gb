@@ -291,10 +291,14 @@ int mm_map_seed(const mm_idx_t *mi, int n_segs, const int *qlens, const char **s
 	chn_pen_gap  = opt->chain_gap_scale * 0.01 * mi->k;
 	chn_pen_skip = opt->chain_skip_scale * 0.01 * mi->k;
 
-    // int ret = mg_plchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
-	// 					 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
+    mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
+						 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
 
-	int ret = mg_plchain_dp();
+	int ret = plchain_append(0, n_a);
+
+	// NOTE: frag_gap is fixed from here as we ignore rechain
+	b->frag_gap = max_chain_gap_ref;
+	b->rep_len = rep_len;
 
     plmap->a = a;
     plmap->hash = hash;
@@ -339,44 +343,9 @@ void *mm_map_alignment(const mm_idx_t *mi, int n_segs, const int *qlens, const c
 
 	// fprintf(stderr, "[M: %s] done major chaining\n", __func__);
 
-	if (opt->bw_long > opt->bw && (opt->flag & (MM_F_SPLICE|MM_F_SR|MM_F_NO_LJOIN)) == 0 && n_segs == 1 && n_regs0 > 1) { // re-chain/long-join for long sequences
-		int32_t st = (int32_t)a[0].y, en = (int32_t)a[(int32_t)u[0] - 1].y;
-		if (qlen_sum - (en - st) > opt->rmq_rescue_size || en - st > qlen_sum * opt->rmq_rescue_ratio) {
-			int32_t i;
-			for (i = 0, n_a = 0; i < n_regs0; ++i) n_a += (int32_t)u[i];
-			kfree(b->km, u);
-			radix_sort_128x(a, a + n_a);
-			a = mg_lchain_rmq(opt->max_gap, opt->rmq_inner_dist, opt->bw_long, opt->max_chain_skip, opt->rmq_size_cap, opt->min_cnt, opt->min_chain_score,
-							  chn_pen_gap, chn_pen_skip, n_a, a, &n_regs0, &u, b->km);
-		}
-	} else if (opt->max_occ > opt->mid_occ && rep_len > 0 && !(opt->flag & MM_F_RMQ)) { // re-chain, mostly for short reads
-		int rechain = 0;
-		if (n_regs0 > 0) { // test if the best chain has all the segments
-			int n_chained_segs = 1, max = 0, max_i = -1, max_off = -1, off = 0;
-			for (i = 0; i < n_regs0; ++i) { // find the best chain
-				if (max < (int)(u[i]>>32)) max = u[i]>>32, max_i = i, max_off = off;
-				off += (uint32_t)u[i];
-			}
-			for (i = 1; i < (int32_t)u[max_i]; ++i) // count the number of segments in the best chain
-				if ((a[max_off+i].y&MM_SEED_SEG_MASK) != (a[max_off+i-1].y&MM_SEED_SEG_MASK))
-					++n_chained_segs;
-			if (n_chained_segs < n_segs)
-				rechain = 1;
-		} else rechain = 1;
-		if (rechain) { // redo chaining with a higher max_occ threshold
-			kfree(b->km, a);
-			kfree(b->km, u);
-			kfree(b->km, mini_pos);
-			if (opt->flag & MM_F_HEAP_SORT) a = collect_seed_hits_heap(b->km, opt, opt->max_occ, mi, qname, &mv, qlen_sum, &n_a, &rep_len, &n_mini_pos, &mini_pos);
-			else a = collect_seed_hits(b->km, opt, opt->max_occ, mi, qname, &mv, qlen_sum, &n_a, &rep_len, &n_mini_pos, &mini_pos);
-			// NOTE: chaining second called here
-			a = mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
-							 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
-			fprintf(stderr, "[M: %s] done rechaining\n", __func__);
-		}
-	}
-	b->frag_gap = max_chain_gap_ref;
-	b->rep_len = rep_len;
+	// FIXME: temporarily ignore rechain
+	// b->frag_gap = max_chain_gap_ref;
+	// b->rep_len = rep_len;
 
     // NOTE: ALIGNMENT starts here
 
@@ -649,22 +618,12 @@ static void seed_worker_for(void *_data, long i, int tid) {
 		qlens[j] = s->seq[off + j].l_seq;
 		qseqs[j] = s->seq[off + j].seq;
 	}
-	if (s->p->opt->flag & MM_F_INDEPEND_SEG) {
-		// fprintf(stderr, "[M: %s] independent segs\n", __func__);
-		for (j = 0; j < s->n_seg[i]; ++j) {
-			mm_map_frag(s->p->mi, 1, &qlens[j], &qseqs[j], &s->n_reg[off+j], &s->reg[off+j], b, s->p->opt, s->seq[off+j].name);
-			s->rep_len[off + j] = b->rep_len;
-			s->frag_gap[off + j] = b->frag_gap;
-		}
-	} else {
-		// fprintf(stderr, "[M: %s] dependent segs %d\n", __func__, s->n_seg[i]);
-		// NOTE: normally this way
-		mm_map_frag(s->p->mi, s->n_seg[i], qlens, qseqs, &s->n_reg[off], &s->reg[off], b, s->p->opt, s->seq[off].name);
-		for (j = 0; j < s->n_seg[i]; ++j) {
-			s->rep_len[off + j] = b->rep_len;
-			s->frag_gap[off + j] = b->frag_gap;
-		}
-	}
+
+	// no difference between independent seg or not
+	// normally off == i
+	mm_map_seed(s->p->mi, s->n_seg[i], qlens, qseqs, &s->n_reg[off], &s->reg[off], b, s->p->opt, s->seq[off].name);
+	
+	
 }
 
 static void chain_worker_for(void *_data, long i, int tid) {
@@ -684,6 +643,11 @@ static void align_worker_for(void *_data, long i, int tid) {
 	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
 	mm_tbuf_t *b = s->buf[tid];
 	assert(s->n_seg[i] <= MM_MAX_SEG);
+
+	for (j = 0; j < s->n_seg[i]; ++j) {
+		s->rep_len[off + j] = b->rep_len;
+		s->frag_gap[off + j] = b->frag_gap;
+	}
 	for (j = 0; j < s->n_seg[i]; ++j) // flip the query strand and coordinate to the original read strand
 		if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori>>1&1)) || (j == 1 && (pe_ori&1)))) {
 			int k, t;
@@ -858,15 +822,18 @@ static void *worker_pipeline(void *shared, int step, void *in)
 	*/
     } else if (step == 1) { // step 1: seeding + append chaining tasks
 		fprintf(stderr, "[M: %s] kt_for %d segs %d parts\n", __func__, ((step_t*)in)->n_frag, p->n_parts);
+		pltask_init(((step_t*)in)->n_frag); // init gpu task list based on num_frag 
 		if (p->n_parts > 0) merge_hits((step_t*)in);
 		// NOTE: allocate threads for worker, n_threads is input of mm_map_file_frag()
-		else kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
+		else kt_for(p->n_threads, seed_worker_for, in, ((step_t*)in)->n_frag);
 		return in;
 	} else if (step == 2) { // step 2: check if chaining is done (do backtracking), tell GPU to start if memory is not filled up
 		fprintf(stderr, "[M: %s] step2 \n", __func__);
+		kt_for(p->n_threads, chain_worker_for, in, ((step_t*)in)->n_frag);
 		return in;
 	} else if (step == 3) { // step 3: check if alignment is done 
 		fprintf(stderr, "[M: %s] step3 \n", __func__);
+		kt_for(p->n_threads, align_worker_for, in, ((step_t*)in)->n_frag);
 		return in;
     } else if (step == 4) { // step 4: output
 		void *km = 0;

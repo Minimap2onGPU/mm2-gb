@@ -425,10 +425,10 @@ typedef struct {
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
 {
 	// NOTE: mm_map called from here -> chaining
-	fprintf(stderr, "[M: %s] work on seg %ld\n", __func__, i);
     step_t *s = (step_t*)_data;
 	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
 	const char *qseqs[MM_MAX_SEG];
+	// fprintf(stderr, "[M: %s] work on seg %ld, %d\n", __func__, i, off); // off == i
 	double t = 0.0;
 	mm_tbuf_t *b = s->buf[tid];
 	assert(s->n_seg[i] <= MM_MAX_SEG);
