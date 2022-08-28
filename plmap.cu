@@ -800,14 +800,86 @@ typedef struct {
 	FILE *fp_split, **fp_parts;
 } pipeline_t;
 
-typedef struct {
+typedef struct { // NOTE: this step_t is defined for plchain usage only
 	const pipeline_t *p;
     int n_seq, n_frag;
 	mm_bseq1_t *seq;
 	int *n_reg, *seg_off, *n_seg, *rep_len, *frag_gap;
 	mm_reg1_t **reg;
 	mm_tbuf_t **buf;
+	double t;
 } step_t;
+
+static void seed_worker_for(void *_data, long i, int tid) {
+	// NOTE: this function call seeding and post chaining tasks to gpu
+	fprintf(stderr, "[M: %s] work on seg %ld\n", __func__, i);
+    step_t *s = (step_t*)_data;
+	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
+	const char *qseqs[MM_MAX_SEG];
+	s->t = 0.0;
+	mm_tbuf_t *b = s->buf[tid];
+	assert(s->n_seg[i] <= MM_MAX_SEG);
+	if (mm_dbg_flag & MM_DBG_PRINT_QNAME) { //DEBUG:
+		fprintf(stderr, "QR\t%s\t%d\t%d\n", s->seq[off].name, tid, s->seq[off].l_seq);
+			s->t = realtime();
+	}
+	for (j = 0; j < s->n_seg[i]; ++j) {
+		if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori>>1&1)) || (j == 1 && (pe_ori&1))))
+			mm_revcomp_bseq(&s->seq[off + j]);
+		qlens[j] = s->seq[off + j].l_seq;
+		qseqs[j] = s->seq[off + j].seq;
+	}
+	if (s->p->opt->flag & MM_F_INDEPEND_SEG) {
+		// fprintf(stderr, "[M: %s] independent segs\n", __func__);
+		for (j = 0; j < s->n_seg[i]; ++j) {
+			mm_map_frag(s->p->mi, 1, &qlens[j], &qseqs[j], &s->n_reg[off+j], &s->reg[off+j], b, s->p->opt, s->seq[off+j].name);
+			s->rep_len[off + j] = b->rep_len;
+			s->frag_gap[off + j] = b->frag_gap;
+		}
+	} else {
+		// fprintf(stderr, "[M: %s] dependent segs %d\n", __func__, s->n_seg[i]);
+		// NOTE: normally this way
+		mm_map_frag(s->p->mi, s->n_seg[i], qlens, qseqs, &s->n_reg[off], &s->reg[off], b, s->p->opt, s->seq[off].name);
+		for (j = 0; j < s->n_seg[i]; ++j) {
+			s->rep_len[off + j] = b->rep_len;
+			s->frag_gap[off + j] = b->frag_gap;
+		}
+	}
+}
+
+static void chain_worker_for(void *_data, long i, int tid) {
+	// NOTE: this function notify gpu to start chaining and wait until chaining is done, then goes backtracking
+	// GPU will also start chaining without notification if capacity reached
+	// depends on alignment device, post or pass alignment tasks to the next step
+	step_t *s = (step_t*)_data;
+	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
+	mm_tbuf_t *b = s->buf[tid];
+	assert(s->n_seg[i] <= MM_MAX_SEG);
+	
+}
+
+static void align_worker_for(void *_data, long i, int tid) {
+	// NOTE: alignment tasks 
+	step_t *s = (step_t*)_data;
+	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
+	mm_tbuf_t *b = s->buf[tid];
+	assert(s->n_seg[i] <= MM_MAX_SEG);
+	for (j = 0; j < s->n_seg[i]; ++j) // flip the query strand and coordinate to the original read strand
+		if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori>>1&1)) || (j == 1 && (pe_ori&1)))) {
+			int k, t;
+			mm_revcomp_bseq(&s->seq[off + j]);
+			for (k = 0; k < s->n_reg[off + j]; ++k) {
+				mm_reg1_t *r = &s->reg[off + j][k];
+				t = r->qs;
+				r->qs = qlens[j] - r->qe;
+				r->qe = qlens[j] - t;
+				r->rev = !r->rev;
+			}
+		}
+	if (mm_dbg_flag & MM_DBG_PRINT_QNAME)
+		fprintf(stderr, "QT\t%s\t%d\t%.6f\n", s->seq[off].name, tid, realtime() - s->t);
+}
+
 
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
 {
@@ -960,13 +1032,23 @@ static void *worker_pipeline(void *shared, int step, void *in)
 				}
 			return s;
 		} else free(s);
-    } else if (step == 1) { // step 1: map
+	
+	/*
+		NOTE: GPU shall start automatically when capacity reach, otherwise next step will tell GPU to start
+	*/
+    } else if (step == 1) { // step 1: seeding + append chaining tasks
 		fprintf(stderr, "[M: %s] kt_for %d segs %d parts\n", __func__, ((step_t*)in)->n_frag, p->n_parts);
 		if (p->n_parts > 0) merge_hits((step_t*)in);
 		// NOTE: allocate threads for worker, n_threads is input of mm_map_file_frag()
 		else kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
 		return in;
-    } else if (step == 2) { // step 2: output
+	} else if (step == 2) { // step 2: check if chaining is done (do backtracking), tell GPU to start if memory is not filled up
+		fprintf(stderr, "[M: %s] step2 \n", __func__);
+		return in;
+	} else if (step == 3) { // step 3: check if alignment is done 
+		fprintf(stderr, "[M: %s] step3 \n", __func__);
+		return in;
+    } else if (step == 4) { // step 4: output
 		void *km = 0;
         step_t *s = (step_t*)in;
 		const mm_idx_t *mi = p->mi;

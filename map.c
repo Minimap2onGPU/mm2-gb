@@ -422,65 +422,6 @@ typedef struct {
 	mm_tbuf_t **buf;
 } step_t;
 
-static void preworker_for(void *_data, long i, int tid) {
-	// NOTE: mm_map called from here -> chaining
-	fprintf(stderr, "[M: %s] work on seg %ld\n", __func__, i);
-    step_t *s = (step_t*)_data;
-	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
-	const char *qseqs[MM_MAX_SEG];
-	double t = 0.0;
-	mm_tbuf_t *b = s->buf[tid];
-	assert(s->n_seg[i] <= MM_MAX_SEG);
-	if (mm_dbg_flag & MM_DBG_PRINT_QNAME) { //DEBUG:
-		fprintf(stderr, "QR\t%s\t%d\t%d\n", s->seq[off].name, tid, s->seq[off].l_seq);
-		t = realtime();
-	}
-	for (j = 0; j < s->n_seg[i]; ++j) {
-		if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori>>1&1)) || (j == 1 && (pe_ori&1))))
-			mm_revcomp_bseq(&s->seq[off + j]);
-		qlens[j] = s->seq[off + j].l_seq;
-		qseqs[j] = s->seq[off + j].seq;
-	}
-	if (s->p->opt->flag & MM_F_INDEPEND_SEG) {
-		// fprintf(stderr, "[M: %s] independent segs\n", __func__);
-		for (j = 0; j < s->n_seg[i]; ++j) {
-			mm_map_frag(s->p->mi, 1, &qlens[j], &qseqs[j], &s->n_reg[off+j], &s->reg[off+j], b, s->p->opt, s->seq[off+j].name);
-			s->rep_len[off + j] = b->rep_len;
-			s->frag_gap[off + j] = b->frag_gap;
-		}
-	} else {
-		// fprintf(stderr, "[M: %s] dependent segs %d\n", __func__, s->n_seg[i]);
-		// NOTE: normally this way
-		mm_map_frag(s->p->mi, s->n_seg[i], qlens, qseqs, &s->n_reg[off], &s->reg[off], b, s->p->opt, s->seq[off].name);
-		for (j = 0; j < s->n_seg[i]; ++j) {
-			s->rep_len[off + j] = b->rep_len;
-			s->frag_gap[off + j] = b->frag_gap;
-		}
-	}
-}
-
-static void postworker_for(void *_data, long i, int tid) {
-	step_t *s = (step_t*)_data;
-	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
-	double t = 0.0;
-	mm_tbuf_t *b = s->buf[tid];
-	assert(s->n_seg[i] <= MM_MAX_SEG);
-	for (j = 0; j < s->n_seg[i]; ++j) // flip the query strand and coordinate to the original read strand
-		if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori>>1&1)) || (j == 1 && (pe_ori&1)))) {
-			int k, t;
-			mm_revcomp_bseq(&s->seq[off + j]);
-			for (k = 0; k < s->n_reg[off + j]; ++k) {
-				mm_reg1_t *r = &s->reg[off + j][k];
-				t = r->qs;
-				r->qs = qlens[j] - r->qe;
-				r->qe = qlens[j] - t;
-				r->rev = !r->rev;
-			}
-		}
-	if (mm_dbg_flag & MM_DBG_PRINT_QNAME)
-		fprintf(stderr, "QT\t%s\t%d\t%.6f\n", s->seq[off].name, tid, realtime() - t);
-}
-
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
 {
 	// NOTE: mm_map called from here -> chaining
