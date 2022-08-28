@@ -8,35 +8,6 @@
 #include "plthread.h"
 #include "debug.h"
 
-/*
-    chaining task types and task lists
-*/
-
-enum Status {
-    EMPTY, // empty slot
-    IDLE, // task hasn't started yet
-    TASK_ON, // task is running
-    TASK_END, // task is done
-};
-
-struct task_chain_t {
-    int i; // index of the sequence 
-	int offset; // index where anchors were appended to and where to find f, p 
-    int size; // batch size
-    Status status; // status of the task
-    int max_chain_gap_qry, max_chain_gap_ref;
-    int rep_len, qlen_sum, n_regs0, n_mini_pos;
-	uint32_t hash;
-	uint64_t *u, *mini_pos;
-	mm128_t *a; // anchors data
-	mm128_v mv;
-};
-
-struct task_align_t {
-	// TODO: waiting to be filled
-    Status status; // status of the task
-};
-
 static task_chain_t *chaining_tasks;
 static task_align_t *alignment_tasks;
 static int64_t chain_index; // += size for every chaining task
@@ -50,6 +21,14 @@ int pltask_init(int num_seqs) {
     chaining_tasks = (task_chain_t *) malloc(sizeof(task_chain_t)*num_seqs);
     alignment_tasks = (task_align_t *) malloc(sizeof(task_align_t)*num_seqs);
     return 0;
+}
+
+const task_chain_t *pltask_chain_get(int i) {
+    return chaining_tasks+i;
+}
+
+const task_align_t *pltask_align_get(int i) {
+    return alignment_tasks+i;
 }
 
 /*********************** Thread function calls start ************************/

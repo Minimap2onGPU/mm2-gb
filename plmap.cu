@@ -257,7 +257,7 @@ int mm_map_seed(const mm_idx_t *mi, int n_segs, const int *qlens, const char **s
 	float chn_pen_gap, chn_pen_skip;
 
 	for (i = 0, qlen_sum = 0; i < n_segs; ++i)
-		qlen_sum += qlens[i], n_regs[i] = 0, regs[i] = 0;
+		qlen_sum += qlens[i];
 
 	if (qlen_sum == 0 || n_segs <= 0 || n_segs > MM_MAX_SEG) return;
 	if (opt->max_qlen > 0 && qlen_sum > opt->max_qlen) return;
@@ -291,26 +291,24 @@ int mm_map_seed(const mm_idx_t *mi, int n_segs, const int *qlens, const char **s
 	chn_pen_gap  = opt->chain_gap_scale * 0.01 * mi->k;
 	chn_pen_skip = opt->chain_skip_scale * 0.01 * mi->k;
 
-    mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
+    a = mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
 						 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
 
 	int ret = plchain_append(0, n_a);
 
 	// NOTE: frag_gap is fixed from here as we ignore rechain
+	// also mv.a is freed here as no rechain need it
 	b->frag_gap = max_chain_gap_ref;
 	b->rep_len = rep_len;
+	kfree(b->km, mv.a);
+
 
     plmap->a = a;
     plmap->hash = hash;
     plmap->mini_pos = mini_pos;
-    plmap->mv = mv;
     plmap->n_mini_pos = n_mini_pos;
     plmap->n_regs0 = n_regs0;
-    plmap->qlen_sum = qlen_sum;
-    plmap->rep_len = rep_len;
     plmap->u = u;
-    plmap->max_chain_gap_qry = max_chain_gap_qry;
-    plmap->max_chain_gap_ref = max_chain_gap_ref;
 
     return ret; 
 }
@@ -324,24 +322,20 @@ int mm_map_chain(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 void *mm_map_alignment(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, \
                         mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, mm_plmap_t *plmap) 
 {
-    int rep_len = plmap->rep_len, qlen_sum = plmap->qlen_sum, n_regs0 = plmap->n_regs0, n_mini_pos = plmap->n_mini_pos;
+    int rep_len = b->rep_len, max_chain_gap_ref = b->frag_gap;
+	int qlen_sum = plmap->qlen_sum, n_regs0 = plmap->n_regs0, n_mini_pos = plmap->n_mini_pos;
 	uint32_t hash = plmap->hash;
 	uint64_t *u = plmap->u, *mini_pos = plmap->mini_pos;
 	mm128_t *a = plmap->a;
-	mm128_v mv = plmap->mv;
-    int max_chain_gap_qry = plmap->max_chain_gap_qry, max_chain_gap_ref = plmap->max_chain_gap_ref;
+    
     int i, j; // local
     int is_splice = !!(opt->flag & MM_F_SPLICE), is_sr = !!(opt->flag & MM_F_SR); // local
 	int64_t n_a; // local
 	mm_reg1_t *regs0; // local
 	km_stat_t kmst; // local
-	float chn_pen_gap, chn_pen_skip; // local
 
-    // redo parameter setting 
-	chn_pen_gap  = opt->chain_gap_scale * 0.01 * mi->k;
-	chn_pen_skip = opt->chain_skip_scale * 0.01 * mi->k;
-
-	// fprintf(stderr, "[M: %s] done major chaining\n", __func__);
+	for (i = 0, qlen_sum = 0; i < n_segs; ++i)
+		qlen_sum += qlens[i], n_regs[i] = 0, regs[i] = 0;
 
 	// FIXME: temporarily ignore rechain
 	// b->frag_gap = max_chain_gap_ref;
@@ -386,7 +380,6 @@ void *mm_map_alignment(const mm_idx_t *mi, int n_segs, const int *qlens, const c
 			mm_pair(b->km, max_chain_gap_ref, opt->pe_bonus, opt->a * 2 + opt->b, opt->a, qlens, n_regs, regs); // pairing
 	}
 
-	kfree(b->km, mv.a);
 	kfree(b->km, a);
 	kfree(b->km, u);
 	kfree(b->km, mini_pos);
