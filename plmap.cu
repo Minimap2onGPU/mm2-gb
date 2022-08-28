@@ -729,7 +729,7 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 			s->frag_gap[off + j] = b->frag_gap;
 		}
 	} else {
-		fprintf(stderr, "[M: %s] dependent segs %d\n", __func__, s->n_seg[i]);
+		// fprintf(stderr, "[M: %s] dependent segs %d\n", __func__, s->n_seg[i]);
 		// NOTE: normally this way
 		mm_map_frag(s->p->mi, s->n_seg[i], qlens, qseqs, &s->n_reg[off], &s->reg[off], b, s->p->opt, s->seq[off].name);
 		for (j = 0; j < s->n_seg[i]; ++j) {

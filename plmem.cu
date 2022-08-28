@@ -13,9 +13,10 @@
 */
 
 enum Status {
-    IDLE,
-    TASK_ON,
-    TASK_END,
+    EMPTY, // empty slot
+    IDLE, // task hasn't started yet
+    TASK_ON, // task is running
+    TASK_END, // task is done
 };
 
 struct task_chain_t {
@@ -25,25 +26,28 @@ struct task_chain_t {
     Status status; // status of the task
 };
 
-struct task_alignment_t {
-	// FIXME: waiting to be filled
+struct task_align_t {
+	// TODO: waiting to be filled
     Status status; // status of the task
 };
 
 static task_chain_t *chaining_tasks;
-static task_alignment_t *alignment_tasks;
+static task_align_t *alignment_tasks;
 static int64_t chain_index; // += size for every chaining task
 static int64_t align_index; // += size for every alignment task
 static bool gpu_busy;
 
-int pltask_init() {
+int pltask_init(int num_seqs) {
     // TODO: compute gpu memory size and initialize the tasks list 
-    
+    gpu_busy = false;
+    chain_index = align_index = 0;
+    chaining_tasks = (task_chain_t *) malloc(sizeof(task_chain_t)*num_seqs);
+    alignment_tasks = (task_align_t *) malloc(sizeof(task_align_t)*num_seqs);
 }
 
 /*********************** Thread function calls start ************************/
 
-int plchain_append() {
+int plchain_append(int64_t n_a) {
 
     // TODO: increment the index 
     // NOTE: No consistence violation as sequence index on each cpu thread is independent

@@ -425,7 +425,7 @@ typedef struct {
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
 {
 	// NOTE: mm_map called from here -> chaining
-	// fprintf(stderr, "[M: %s] work on seg %ld\n", __func__, i);
+	fprintf(stderr, "[M: %s] work on seg %ld\n", __func__, i);
     step_t *s = (step_t*)_data;
 	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
 	const char *qseqs[MM_MAX_SEG];
@@ -450,7 +450,7 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 			s->frag_gap[off + j] = b->frag_gap;
 		}
 	} else {
-		fprintf(stderr, "[M: %s] dependent segs %d\n", __func__, s->n_seg[i]);
+		// fprintf(stderr, "[M: %s] dependent segs %d\n", __func__, s->n_seg[i]);
 		// NOTE: normally this way
 		mm_map_frag(s->p->mi, s->n_seg[i], qlens, qseqs, &s->n_reg[off], &s->reg[off], b, s->p->opt, s->seq[off].name);
 		for (j = 0; j < s->n_seg[i]; ++j) {
