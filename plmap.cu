@@ -244,7 +244,7 @@ static mm_reg1_t *align_regs(const mm_mapopt_t *opt, const mm_idx_t *mi, void *k
 }
 
 int mm_map_seed(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, \
-                        mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, mm_plmap_t *plmap)
+                        mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long index)
 {
     // NOTE: prechain tasks and append to GPU task list
 	int i, j, rep_len, qlen_sum, n_regs0, n_mini_pos;
@@ -294,39 +294,34 @@ int mm_map_seed(const mm_idx_t *mi, int n_segs, const int *qlens, const char **s
     a = mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
 						 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
 
-	int ret = plchain_append(0, n_a);
-
+	// TODO: need more input
+	int ret = plchain_append(max_chain_gap_ref, max_chain_gap_qry, opt, chn_pen_gap, chn_pen_skip,\
+							is_splice, n_segs, n_a, a, b->km, n_mini_pos, mini_pos, hash, index);
+	// NOTE: n_regs and u can be set in append()
 	// NOTE: frag_gap is fixed from here as we ignore rechain
 	// also mv.a is freed here as no rechain need it
 	b->frag_gap = max_chain_gap_ref;
 	b->rep_len = rep_len;
 	kfree(b->km, mv.a);
 
-
-    plmap->a = a;
-    plmap->hash = hash;
-    plmap->mini_pos = mini_pos;
-    plmap->n_mini_pos = n_mini_pos;
-    plmap->n_regs0 = n_regs0;
-    plmap->u = u;
-
     return ret; 
 }
 
 int mm_map_chain(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, \
-                        mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, mm_plmap_t *plmap)
+                        mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long index)
 {
-
+	return 0;
 }
 
-void *mm_map_alignment(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, \
-                        mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, mm_plmap_t *plmap) 
+void *mm_map_align(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, \
+                        mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long index) 
 {
     int rep_len = b->rep_len, max_chain_gap_ref = b->frag_gap;
-	int qlen_sum = plmap->qlen_sum, n_regs0 = plmap->n_regs0, n_mini_pos = plmap->n_mini_pos;
-	uint32_t hash = plmap->hash;
-	uint64_t *u = plmap->u, *mini_pos = plmap->mini_pos;
-	mm128_t *a = plmap->a;
+	auto *task = pltask_align_get(index);
+	int n_regs0 = task->n_regs0, n_mini_pos = task->n_mini_pos;
+	uint32_t hash = task->hash;
+	uint64_t *u = task->u, *mini_pos = task->mini_pos;
+	mm128_t *a = task->a;
     
     int i, j; // local
     int is_splice = !!(opt->flag & MM_F_SPLICE), is_sr = !!(opt->flag & MM_F_SR); // local
@@ -334,6 +329,7 @@ void *mm_map_alignment(const mm_idx_t *mi, int n_segs, const int *qlens, const c
 	mm_reg1_t *regs0; // local
 	km_stat_t kmst; // local
 
+	int qlen_sum;
 	for (i = 0, qlen_sum = 0; i < n_segs; ++i)
 		qlen_sum += qlens[i], n_regs[i] = 0, regs[i] = 0;
 
@@ -594,10 +590,10 @@ typedef struct { // NOTE: this step_t is defined for plchain usage only
 
 static void seed_worker_for(void *_data, long i, int tid) {
 	// NOTE: this function call seeding and post chaining tasks to gpu
-	fprintf(stderr, "[M: %s] work on seg %ld\n", __func__, i);
     step_t *s = (step_t*)_data;
 	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
 	const char *qseqs[MM_MAX_SEG];
+	fprintf(stderr, "[M: %s] seed work on seg i: %ld = off %d\n", __func__, i, off);
 	s->t = 0.0;
 	mm_tbuf_t *b = s->buf[tid];
 	assert(s->n_seg[i] <= MM_MAX_SEG);
@@ -614,8 +610,11 @@ static void seed_worker_for(void *_data, long i, int tid) {
 
 	// no difference between independent seg or not
 	// normally off == i
-	mm_map_seed(s->p->mi, s->n_seg[i], qlens, qseqs, &s->n_reg[off], &s->reg[off], b, s->p->opt, s->seq[off].name);
-	
+	mm_map_seed(s->p->mi, s->n_seg[i], qlens, qseqs, &s->n_reg[off], &s->reg[off], b, s->p->opt, s->seq[off].name, i);
+	for (j = 0; j < s->n_seg[i]; ++j) {
+		s->rep_len[off + j] = b->rep_len;
+		s->frag_gap[off + j] = b->frag_gap;
+	}
 	
 }
 
@@ -624,23 +623,25 @@ static void chain_worker_for(void *_data, long i, int tid) {
 	// GPU will also start chaining without notification if capacity reached
 	// depends on alignment device, post or pass alignment tasks to the next step
 	step_t *s = (step_t*)_data;
+	// TODO: read real offset from task type
 	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
 	mm_tbuf_t *b = s->buf[tid];
 	assert(s->n_seg[i] <= MM_MAX_SEG);
+	fprintf(stderr, "[M: %s] chain work on seg i: %ld = off %d\n", __func__, i, off);
 	
+	mm_map_chain();
 }
 
 static void align_worker_for(void *_data, long i, int tid) {
 	// NOTE: alignment tasks 
 	step_t *s = (step_t*)_data;
+	// TODO: read real offset from task type
 	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
 	mm_tbuf_t *b = s->buf[tid];
 	assert(s->n_seg[i] <= MM_MAX_SEG);
+	fprintf(stderr, "[M: %s] align work on seg i: %ld = off %d\n", __func__, i, off);
 
-	for (j = 0; j < s->n_seg[i]; ++j) {
-		s->rep_len[off + j] = b->rep_len;
-		s->frag_gap[off + j] = b->frag_gap;
-	}
+	mm_map_align();
 	for (j = 0; j < s->n_seg[i]; ++j) // flip the query strand and coordinate to the original read strand
 		if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori>>1&1)) || (j == 1 && (pe_ori&1)))) {
 			int k, t;

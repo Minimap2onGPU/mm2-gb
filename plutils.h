@@ -13,6 +13,7 @@
 
 typedef struct {
     int max_iter, max_dist_x, max_dist_y, max_skip, bw, is_cdna, n_seg;
+    int min_cnt, min_sc;
     float chn_pen_gap, chn_pen_skip;
 } Misc;
 

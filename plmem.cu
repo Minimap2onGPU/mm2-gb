@@ -10,33 +10,42 @@
 
 static task_chain_t *chaining_tasks;
 static task_align_t *alignment_tasks;
-static int64_t chain_index; // += size for every chaining task
-static int64_t align_index; // += size for every alignment task
+static int64_t chain_count; // +=n_a for every chaining task
+static int64_t align_count; // +=n_a for every alignment task
 static bool gpu_busy;
 
+// TODO: probably sill need a lock as atomic add has no boundary check
+
 int pltask_init(int num_seqs) {
-    // TODO: compute gpu memory size and initialize the tasks list 
+    // TODO: compute gpu memory size and initialize ax ay buffers
     gpu_busy = false;
-    chain_index = align_index = 0;
+    chain_count = align_count = 0;
     chaining_tasks = (task_chain_t *) malloc(sizeof(task_chain_t)*num_seqs);
     alignment_tasks = (task_align_t *) malloc(sizeof(task_align_t)*num_seqs);
     return 0;
 }
 
-const task_chain_t *pltask_chain_get(int i) {
+// NOTE: i is qry sequence offset
+const task_chain_t *pltask_chain_get(long i) {
     return chaining_tasks+i;
 }
 
-const task_align_t *pltask_align_get(int i) {
+const task_align_t *pltask_align_get(long i) {
     return alignment_tasks+i;
 }
 
 /*********************** Thread function calls start ************************/
 
-int plchain_append(long i, int64_t n_a) {
+int plchain_append(int max_dist_x, int max_dist_y, const mm_mapopt_t *opt,
+    float chn_pen_gap, float chn_pen_skip, int is_cdna,
+    int n_seg, int64_t n,  // NOTE: n is number of anchors
+    mm128_t *a,            // NOTE: a is ptr to anchors.
+    void *km, int n_mini_pos, uint64_t *mini_pos, uint32_t hash, long i) {  // TODO: make sure this works when n has more than 32 bits
 
-    // TODO: increment the index 
-    // NOTE: No consistence violation as sequence index on each cpu thread is independent
+    // TODO: increment the count, check if memory is full
+    
+
+    // NOTE: memory copy happens in gpu to avoid two global var increment which require lock
 
     return 0;
 }
