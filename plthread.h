@@ -14,6 +14,16 @@ extern "C" {
 #endif
 
 /*
+    Parameters
+*/
+
+#define ITER_LIMIT 10000
+#define MAX_READ_NUM 100000
+#define MEM_CPU (36-6) // 36 - 6 GB for possible exceed read
+#define MEM_GPU (16-4) // 16 - 4 GB as memory pool = 16760832(0xffc000) KB
+#define SATURATE_FACTOR (0.7) // NOTE: how much portion of cpu memory shall be allocated, < 1
+
+/*
     GPU task types
 */
 
@@ -67,6 +77,8 @@ int plchain_append(int max_dist_x, int max_dist_y, const mm_mapopt_t *opt,
     void *km, int n_mini_pos, uint64_t *mini_pos, uint32_t hash, long i); // TODO: make sure this works when n has more than 32 bits
 
 int plchain_check(long i);
+
+int plchain_stream_launch(long end);
 
 
 

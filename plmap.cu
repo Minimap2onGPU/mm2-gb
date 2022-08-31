@@ -377,7 +377,7 @@ void *mm_map_align(const mm_idx_t *mi, int n_segs, const int *qlens, const char 
 			mm_pair(b->km, max_chain_gap_ref, opt->pe_bonus, opt->a * 2 + opt->b, opt->a, qlens, n_regs, regs); // pairing
 	}
 
-	kfree(b->km, a);
+	kfree(b->km, a); // NOTE: free a after GPU launched 
 	kfree(b->km, u);
 	kfree(b->km, mini_pos);
 

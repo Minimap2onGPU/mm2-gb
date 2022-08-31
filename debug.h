@@ -6,13 +6,6 @@
 extern "C" {
 #endif
 
-#define ITER_LIMIT 10000
-#define MAX_READ_NUM 100000
-#define MEM_CPU (96-6) // 96 - 6 GB for possible exceed read
-#define MEM_GPU (16-4) // 16 - 4 GB as memory pool = 16760832(0xffc000) KB
-#define SATURATE_FACTOR (0.7) // NOTE: how much portion of cpu memory shall be allocated, < 1
-
-
 extern char input_filename[];
 extern char range_infile[];
 extern char binary_file[];

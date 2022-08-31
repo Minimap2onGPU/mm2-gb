@@ -54,7 +54,7 @@ uint64_t *mg_chain_backtrack(void *km, int64_t n, const int32_t *f, const int64_
 			else n_v = n_v0;
 		}
 	}
-	KMALLOC(km, u, n_u);
+	KMALLOC(km, u, n_u); // NOTE: u is malloced here
 	memset(t, 0, n * 4);
 	for (k = n_z - 1, n_v = n_u = 0; k >= 0; --k) { // populate u[]
 		if (t[z[k].y] == 0) {
