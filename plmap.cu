@@ -255,6 +255,7 @@ int mm_map_seed(const mm_idx_t *mi, int n_segs, const int *qlens, const char **s
 	mm128_t *a;
 	mm128_v mv = {0,0,0};
 	float chn_pen_gap, chn_pen_skip;
+	// n_regs and regs unused until alignment
 
 	for (i = 0, qlen_sum = 0; i < n_segs; ++i)
 		qlen_sum += qlens[i];
@@ -297,7 +298,7 @@ int mm_map_seed(const mm_idx_t *mi, int n_segs, const int *qlens, const char **s
 	// TODO: need more input
 	int ret = plchain_append(max_chain_gap_ref, max_chain_gap_qry, opt, chn_pen_gap, chn_pen_skip,\
 							is_splice, n_segs, n_a, a, b->km, n_mini_pos, mini_pos, hash, index);
-	// NOTE: n_regs and u can be set in append()
+	// NOTE: n_regs0 = n_u and u can be set in append()
 	// NOTE: frag_gap is fixed from here as we ignore rechain
 	// also mv.a is freed here as no rechain need it
 	b->frag_gap = max_chain_gap_ref;

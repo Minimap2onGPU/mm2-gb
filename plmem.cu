@@ -8,11 +8,32 @@
 #include "plthread.h"
 #include "debug.h"
 
-static task_chain_t *chaining_tasks;
-static task_align_t *alignment_tasks;
+static task_t *chaining_tasks;
+static task_t *alignment_tasks;
 static int64_t chain_count; // +=n_a for every chaining task
 static int64_t align_count; // +=n_a for every alignment task
+static long chain_index, done_chain_index;
+static long align_index, done_align_index;
+static size_t max_anchors_stream;
+
 static bool gpu_busy;
+pthread_mutex_t pltask_lock; // lock for task append
+pthread_cond_t pltask_cv;
+
+void set_task_misc(task_t *task, int max_dist_x, int max_dist_y, const mm_mapopt_t *opt,
+    float chn_pen_gap, float chn_pen_skip, int is_cdna, int n_seg) {
+    task->misc.bw = opt->bw;
+    task->misc.max_skip = opt->max_chain_skip;
+    task->misc.max_iter = opt->max_chain_iter;
+    task->misc.min_cnt = opt->min_cnt;
+    task->misc.min_sc = opt->min_chain_score;
+    task->misc.max_dist_x = max_dist_x;
+    task->misc.max_dist_y = max_dist_y;
+    task->misc.is_cdna = is_cdna;
+    task->misc.chn_pen_gap = chn_pen_gap;
+    task->misc.chn_pen_skip = chn_pen_skip;
+    task->misc.n_seg = n_seg;
+}
 
 // TODO: probably sill need a lock as atomic add has no boundary check
 
@@ -20,30 +41,64 @@ int pltask_init(int num_seqs) {
     // TODO: compute gpu memory size and initialize ax ay buffers
     gpu_busy = false;
     chain_count = align_count = 0;
-    chaining_tasks = (task_chain_t *) malloc(sizeof(task_chain_t)*num_seqs);
-    alignment_tasks = (task_align_t *) malloc(sizeof(task_align_t)*num_seqs);
+    chain_index = align_index = done_chain_index = done_align_index = 0;
+    pthread_mutex_init(&pltask_lock, 0);
+	pthread_cond_init(&pltask_cv, 0);
+    chaining_tasks = (task_t *) malloc(sizeof(task_t)*num_seqs);
+    alignment_tasks = (task_t *) malloc(sizeof(task_t)*num_seqs);
+    // TODO: allocate pin memory for each stream
     return 0;
 }
 
 // NOTE: i is qry sequence offset
-const task_chain_t *pltask_chain_get(long i) {
+const task_t *pltask_chain_get(long i) {
     return chaining_tasks+i;
 }
 
-const task_align_t *pltask_align_get(long i) {
+const task_t *pltask_align_get(long i) {
     return alignment_tasks+i;
 }
 
 /*********************** Thread function calls start ************************/
 
+// FIXME: because memory reuse is difficult for multi-stream, start from post buffer
+
 int plchain_append(int max_dist_x, int max_dist_y, const mm_mapopt_t *opt,
     float chn_pen_gap, float chn_pen_skip, int is_cdna,
     int n_seg, int64_t n,  // NOTE: n is number of anchors
     mm128_t *a,            // NOTE: a is ptr to anchors.
-    void *km, int n_mini_pos, uint64_t *mini_pos, uint32_t hash, long i) {  // TODO: make sure this works when n has more than 32 bits
-
+    void *km, int n_mini_pos, uint64_t *mini_pos, uint32_t hash, long i) {  
     // TODO: increment the count, check if memory is full
+    pthread_mutex_lock(&pltask_lock);
     
+    auto *task = chaining_tasks + chain_index++;
+    if (task->status != EMPTY) {
+        // wrong slot
+        // FIXME: how to deal with this?
+        return -1;
+    }
+    
+    task->i = i;
+    task->a = a;
+    task->hash = hash;
+    task->mini_pos = mini_pos;
+    task->n_mini_pos = n_mini_pos;
+    task->size = n;
+    task->n_regs0 = 0;
+    set_task_misc(task, max_dist_x, max_dist_y, opt, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
+
+    // check if reach buffer capacity 
+    if (chain_count + n > max_anchors_stream) {
+        // TODO: call gpu function to copy memory to pin memory and launch stream
+        // update done_index when GPU finished
+    
+        chain_count = 0;
+    }
+
+    task->offset = chain_count;
+    chain_count += n;
+
+    pthread_mutex_unlock(&pltask_lock);
 
     // NOTE: memory copy happens in gpu to avoid two global var increment which require lock
 
