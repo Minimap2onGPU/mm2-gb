@@ -7,6 +7,7 @@
 #include "plchain.h"
 #include "plthread.h"
 #include "debug.h"
+#include "plkernel.cu"
 
 static task_t *chaining_tasks;
 static task_t *alignment_tasks;
@@ -29,7 +30,7 @@ pthread_mutex_t pltask_lock; // lock for task append
 pthread_cond_t pltask_cv;
 
 // TODO: put this into plscore?
-__constant__ Misc misc;
+// __constant__ Misc misc;
 
 void set_task_misc(task_t *task, int max_dist_x, int max_dist_y, const mm_mapopt_t *opt,
     float chn_pen_gap, float chn_pen_skip, int is_cdna, int n_seg) {
@@ -140,6 +141,7 @@ int plchain_append(int max_dist_x, int max_dist_y, const mm_mapopt_t *opt,
         // TODO: call gpu function to copy memory to pin memory and launch stream
         // update done_index when GPU finished
         int ret = plchain_stream_launch(chain_index-1); // current sequence exceed memory
+        done_chain_index = chain_index; 
         chain_count = 0;
     }
 
@@ -155,24 +157,43 @@ int plchain_append(int max_dist_x, int max_dist_y, const mm_mapopt_t *opt,
 
 int plchain_check(long i) {
 
+    pthread_mutex_lock(&pltask_lock);
+
     Status status = chaining_tasks[i].status;
+
+    if (status == IDLE)  {
+
+    } else if (status == TASK_ON) {
+
+    } else if (status == TASK_END) {
+
+    } else {
+        
+    }
+
+
+
     switch (status)
     {
     case IDLE:
         // TODO: start gpu if gpu_busy is false
-        // change gpu_busy to true
-        return -1;
+        break;
 
     case TASK_ON:
-        return 1;
+        // TODO: check all streams
+        // TODO: set status of task
+        // TODO: backtracking 
+        break;
 
     case TASK_END:
         // TODO: misc after gpu is done
-        return 0;
+        // TODO: backtracking 
+        break;
     default:
         break;
     }
 
+    pthread_mutex_unlock(&pltask_lock);
 
     return 0; 
     // TODO: return 0 if gpu is done,
@@ -181,9 +202,6 @@ int plchain_check(long i) {
 }
 
 // TODO: alignment tasks append and check
-
-
-
 
 /*********************** Thread function calls end ************************/
 
@@ -205,18 +223,35 @@ int plchain_stream_launch(long end_chain_index) {
                 }
             }
         }
-        // TODO: collect f and p of last stream 
+        // TODO: collect f and p of last stream, set status 
+        // TODO: hostMemPtr should contain index of tasks 
+        hostMemPtr *host_mem_ptr = host_mem_ptrs+stream_idx;
+        int64_t offset = 0;
+        for (int i = host_mem_ptr->index; i < host_mem_ptr->index+host_mem_ptr->size; ++i) {
+            auto *task = chaining_tasks + i;
+            task->status = TASK_END;
+            task->f = (int32_t *) malloc(sizeof(int32_t) * task->size);
+            task->p = (int64_t *) malloc(sizeof(int64_t) * task->size);
+            memcpy(task->f, host_mem_ptr->f + offset, sizeof(int32_t) * task->size);
+            memcpy(task->p, host_mem_ptr->p + offset, sizeof(int64_t) * task->size);
+            offset += task->size;
+        }
+        // call backtracking? but has no multithread, we still need in GPU backtracking 
+        // TODO: afterwards tasks
 
     } 
     // launch new task
     hostMemPtr *host_mem_ptr = host_mem_ptrs+stream_idx;
     deviceMemPtr *device_mem_ptr = device_mem_ptrs+stream_idx;
-    cudaStream_t* stream = streams+stream_idx;
+    cudaStream_t *stream = streams+stream_idx;
+    cudaEvent_t *event = events+stream_idx;
     int size = (int) (end_chain_index - done_chain_index);
     size_t total_n = chain_count;
     size_t griddim = 0;
     size_t idx = 0;
     size_t cut_num = 0;
+    host_mem_ptr->index = (int) done_chain_index;
+    host_mem_ptr->size = size;
 
     device_mem_ptr->total_n = total_n;
 
@@ -267,11 +302,7 @@ int plchain_stream_launch(long end_chain_index) {
                                                                 device_mem_ptr->d_range, device_mem_ptr->d_cut, device_mem_ptr->d_cut_start_idx);
     cudaCheck();
 
-    #ifdef USEHIP
-    hipMemcpyToSymbolAsync(HIP_SYMBOL(misc), &chaining_tasks[0].misc, sizeof(Misc), 0, cudaMemcpyHostToDevice, *stream);
-    #else
-    cudaMemcpyToSymbolAsync(misc, &chaining_tasks[0].misc, sizeof(Misc), 0, cudaMemcpyHostToDevice, *stream);
-    #endif
+    upload_misc(stream_idx, &chaining_tasks[0].misc, stream);
 
     cudaCheck();
     griddim = (cut_num-1)/NUM_SEG_PER_BLOCK + 1;
@@ -293,7 +324,7 @@ int plchain_stream_launch(long end_chain_index) {
 
     // TODO: do alignment here for correctness test
 
-    return;
+    return 0;
 }
 
 
