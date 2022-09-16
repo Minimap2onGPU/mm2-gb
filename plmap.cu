@@ -2,6 +2,7 @@
 #include <string.h>
 #include <assert.h>
 #include <errno.h>
+#include <pthread.h>
 #include "kthread.h"
 #include "kvec.h"
 #include "kalloc.h"
@@ -9,6 +10,14 @@
 #include "mmpriv.h"
 #include "bseq.h"
 #include "khash.h"
+
+// i = __sync_fetch_and_add(i, delta); // NOTE: atomic add, i starts from thread_idx
+int total_frags = 0;
+int total_tasks = 0;
+int max_awaiting_tasks = 0;
+int awaiting_tasks = 0;
+pthread_mutex_t pltask_lock; // lock for task append
+pthread_cond_t pltask_cv;
 
 struct mm_tbuf_s {
 	void *km;
@@ -280,6 +289,20 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 
 	chn_pen_gap  = opt->chain_gap_scale * 0.01 * mi->k;
 	chn_pen_skip = opt->chain_skip_scale * 0.01 * mi->k;
+
+    pthread_mutex_lock(&pltask_lock);
+    awaiting_tasks ++; 
+    total_tasks ++;
+    if (awaiting_tasks == max_awaiting_tasks || total_tasks == total_frags) { // TODO: when it is not a multiple of n_threads
+        fprintf(stderr, "[M: %s] Launch chaining kernel\n", __func__);
+        awaiting_tasks = 0;
+        pthread_cond_broadcast(&pltask_cv);
+    } else {
+        pthread_cond_wait(&pltask_cv, &pltask_lock);
+    }
+    pthread_mutex_unlock(&pltask_lock);
+    fprintf(stderr, "[M: %s] ready to continue\n", __func__);
+
 	if (opt->flag & MM_F_RMQ) {
 		a = mg_lchain_rmq(opt->max_gap, opt->rmq_inner_dist, opt->bw, opt->max_chain_skip, opt->rmq_size_cap, opt->min_cnt, opt->min_chain_score,
 						  chn_pen_gap, chn_pen_skip, n_a, a, &n_regs0, &u, b->km);
@@ -425,7 +448,7 @@ typedef struct {
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
 {
 	// NOTE: mm_map called from here -> chaining
-	// fprintf(stderr, "[M: %s] work on seg %ld\n", __func__, i);
+	fprintf(stderr, "[M: %s] work on seg %ld\n", __func__, i);
     step_t *s = (step_t*)_data;
 	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
 	const char *qseqs[MM_MAX_SEG];
@@ -573,7 +596,9 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			return s;
 		} else free(s);
     } else if (step == 1) { // step 1: map
-		fprintf(stderr, "[M: %s] kt_for %d segs %d parts\n", __func__, ((step_t*)in)->n_frag, p->n_parts);
+		fprintf(stderr, "[M: %s] kt_for %d segs %d parts, %d threads\n", __func__, ((step_t*)in)->n_frag, p->n_parts, p->n_threads);
+        max_awaiting_tasks = p->n_threads; // NOTE: max_awiting tasks should be equal to n_threads
+        total_frags = ((step_t*)in)->n_frag;
 		if (p->n_parts > 0) merge_hits((step_t*)in);
 		// NOTE: allocate threads for worker, n_threads is input of mm_map_file_frag()
 		else kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
@@ -666,11 +691,11 @@ int mm_map_file_frag(const mm_idx_t *idx, int n_segs, const char **fn, const mm_
 	pl.fp = open_bseqs(pl.n_fp, fn);
 	if (pl.fp == 0) return -1;
 	pl.opt = opt, pl.mi = idx;
-	pl.n_threads = n_threads > 1? n_threads : 1;
+	pl.n_threads = n_threads > 1? n_threads : 1; // NOTE: pl.nthreads can be large 
 	pl.mini_batch_size = opt->mini_batch_size;
 	if (opt->split_prefix)
 		pl.fp_split = mm_split_init(opt->split_prefix, idx);
-	pl_threads = n_threads == 1? 1 : ((opt->flag&MM_F_2_IO_THREADS)? 3 : 2);
+	pl_threads = n_threads == 1? 1 : ((opt->flag&MM_F_2_IO_THREADS)? 3 : 2); // NOTE: pl_threads is either 3 or 2, IO and map
 	kt_pipeline(pl_threads, worker_pipeline, &pl, 3); /* make workload, pipeline */
 
 	free(pl.str.s);

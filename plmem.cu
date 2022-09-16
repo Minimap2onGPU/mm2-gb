@@ -6,6 +6,74 @@
 #include "debug.h"
 #include <time.h>
 
+hostMemPtr host_mem_ptrs[NUM_STREAMS];
+deviceMemPtr device_mem_ptrs[NUM_STREAMS];
+cudaStream_t streams[NUM_STREAMS]; // init streams
+cudaEvent_t events[NUM_STREAMS];
+
+// TODO: put this into plscore?
+__constant__ Misc misc;
+
+// void set_task_misc(task_t *task, int max_dist_x, int max_dist_y, const mm_mapopt_t *opt,
+//     float chn_pen_gap, float chn_pen_skip, int is_cdna, int n_seg) {
+//     task->misc.bw = opt->bw;
+//     task->misc.max_skip = opt->max_chain_skip;
+//     task->misc.max_iter = opt->max_chain_iter;
+//     task->misc.min_cnt = opt->min_cnt;
+//     task->misc.min_sc = opt->min_chain_score;
+//     task->misc.max_dist_x = max_dist_x;
+//     task->misc.max_dist_y = max_dist_y;
+//     task->misc.is_cdna = is_cdna;
+//     task->misc.chn_pen_gap = chn_pen_gap;
+//     task->misc.chn_pen_skip = chn_pen_skip;
+//     task->misc.n_seg = n_seg;
+// }
+
+// TODO: probably sill need a lock as atomic add has no boundary check
+
+int pltask_init(int num_seqs) { // NOTE: num_seqs = n_threads
+
+    // // NOTE: allocate pin memory for each stream
+    // size_t avail_mem_stream = MEM_GPU;
+    // avail_mem_stream = MEM_GPU/NUM_STREAMS * 1e9; // split memory for each stream
+    // // memory per anchor = ax + ay + range + f + p + (start_idx + read_end_idx + cut_start_idx + cut)
+    // // size: F1 = ax + ay + range + f + p; F2 = start_idx + read_end_idx + cut_start_idx; F3 = cut
+    // int64_t F1 = 8+8+4+4+2, F2 = 8+8+8, F3 = 8;
+    // int64_t P1 = ANCHORS_PER_BLOCK, P2 = ANCHORS_PER_CUT;
+    // // avail_memory = (F1 + F2/ANCHORS_PER_BLOCK + F3/ANCHORS_PER_CUT) * num_anchors
+    // max_anchors_stream = (avail_mem_stream*P1*P2) / (F1*P1*P2 + F2*P2 + F3*P1); // ignore misc as anchors cannot just fit whole memory
+    // max_grid = max_anchors_stream / ANCHORS_PER_BLOCK;
+    // max_num_cut = max_anchors_stream / ANCHORS_PER_CUT;
+
+    // for (int i = 0; i < NUM_STREAMS; ++i) {
+    //     cudaStreamCreate(&streams[i]);
+    //     cudaEventCreate(&events[i]);
+    //     cudaCheck();
+    //     // set up host memory pointers
+    //     host_mem_ptrs[i].index = -1; // -1 means unused stream
+    //     cudaMallocHost((void**)&host_mem_ptrs[i].ax, max_anchors_stream * sizeof(int64_t));
+    //     cudaMallocHost((void**)&host_mem_ptrs[i].ay, max_anchors_stream * sizeof(int64_t));
+    //     cudaMallocHost((void**)&host_mem_ptrs[i].f, max_anchors_stream * sizeof(int32_t));
+    //     cudaMallocHost((void**)&host_mem_ptrs[i].p, max_anchors_stream * sizeof(uint16_t));
+    //     cudaMallocHost((void**)&host_mem_ptrs[i].start_idx, max_grid * sizeof(size_t));
+    //     cudaMallocHost((void**)&host_mem_ptrs[i].read_end_idx, max_grid * sizeof(size_t));
+    //     cudaMallocHost((void**)&host_mem_ptrs[i].cut_start_idx, max_grid * sizeof(size_t));
+    //     // set up GPU memory pointers
+    //     cudaMalloc(&device_mem_ptrs[i].d_ax, max_anchors_stream * sizeof(int64_t));
+    //     cudaMalloc(&device_mem_ptrs[i].d_ay, max_anchors_stream * sizeof(int64_t));
+    //     cudaMalloc(&device_mem_ptrs[i].d_range, max_anchors_stream * sizeof(int32_t));
+    //     cudaMalloc(&device_mem_ptrs[i].d_f, max_anchors_stream * sizeof(int32_t));
+    //     cudaMalloc(&device_mem_ptrs[i].d_p, max_anchors_stream * sizeof(uint16_t));    
+    //     cudaMalloc(&device_mem_ptrs[i].d_cut, max_num_cut * sizeof(size_t));
+    //     cudaMalloc(&device_mem_ptrs[i].d_start_idx, sizeof(size_t) * max_grid);
+    //     cudaMalloc(&device_mem_ptrs[i].d_read_end_idx, sizeof(size_t) * max_grid);
+    //     cudaMalloc(&device_mem_ptrs[i].d_cut_start_idx, sizeof(size_t) * max_grid);
+    //     cudaCheck();
+    // }
+    return 0;
+}
+
+
 double dynamic_stream_chain_loop(input_iter* input_arr, int total_reads) {
     // NOTE: return duration of this cpu batch
     // NUM_STREAMS must be more than one

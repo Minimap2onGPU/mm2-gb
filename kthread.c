@@ -148,7 +148,7 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_d
 	aux.n_workers = n_threads;
 	aux.n_steps = n_steps;
 	aux.func = func;
-	aux.shared = shared_data; // include n_threads in kt_for
+	aux.shared = shared_data; // NOTE: include n_threads in kt_for
 	aux.index = 0;
 	pthread_mutex_init(&aux.mutex, 0);
 	pthread_cond_init(&aux.cv, 0);
