@@ -27,8 +27,8 @@ int cut_num = 0;
 // TODO: put this into plscore?
 __constant__ Misc misc;
 
-int64_t *get_p(int64_t n, int i) {
-    uint16_t *rel = host_mem_ptrs[0].p+i;
+int64_t *get_p(int64_t n, size_t index) {
+    uint16_t *rel = host_mem_ptrs[0].p+index;
     int64_t* p = (int64_t*)malloc(sizeof(int64_t)*n);
     for (int i = 0; i < n; ++i) {
         if (rel[i] == 0)
@@ -39,8 +39,8 @@ int64_t *get_p(int64_t n, int i) {
     return p; // TODO: make sure p is freed after using it
 }
 
-int32_t *get_f(int64_t n, int i) {
-    return host_mem_ptrs[0].f+i;
+int32_t *get_f(int64_t n, size_t index) {
+    return host_mem_ptrs[0].f+index;
 }
 
 int pltask_init(int num_threads, int num_seqs) { 
@@ -92,8 +92,8 @@ size_t pltask_append(int64_t n, mm128_t *a, int i) {
     // NOTE: This function must be called inside a critical section
     // FIXME: so far i is never used 
 
+    // record how many anchors appended
     size_t idx = total_n;
-    
     total_n += n;
 
     hostMemPtr *host_mem_ptr = host_mem_ptrs + 0;
@@ -197,9 +197,18 @@ mm128_t *mg_plchain_dp(
     void *km) {  // TODO: make sure this works when n has more than 32 bits
 
     pthread_mutex_lock(&pltask_lock);
-	pltask_append(n, a, awaiting_tasks); // NOTE: append anchors to pin memory
+	size_t key = pltask_append(n, a, awaiting_tasks); // NOTE: append anchors to pin memory, and get the key to result
     awaiting_tasks ++; 
     total_tasks ++;
+
+    if (_u) *_u = 0, *n_u_ = 0;
+	if (n == 0 || a == 0) {
+		kfree(km, a);
+		return 0;
+	}
+    if (max_dist_x < bw) max_dist_x = bw;
+	if (max_dist_y < bw && !is_cdna) max_dist_y = bw;
+
     if (awaiting_tasks == size || total_tasks == total_frags) { // TODO: when it is not a multiple of n_threads
         fprintf(stderr, "[M: %s] Launch chaining kernel\n", __func__);
 		pltask_launch(max_dist_x, max_dist_y, bw, max_skip, max_iter, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
@@ -211,4 +220,27 @@ mm128_t *mg_plchain_dp(
     pthread_mutex_unlock(&pltask_lock);
     fprintf(stderr, "[M: %s] ready to continue\n", __func__);
 
+    int64_t *p = get_p(n, key);
+    int32_t *f = get_f(n, key); // get results from pin memory
+
+    int32_t *t, *v, n_u, n_v, mmax_f = 0, max_drop = bw;
+	uint64_t *u;
+
+	// max_skip = INT32_MAX; // FIXME: no skip limitation for test purpose
+	
+	// KMALLOC(km, p, n); // NOTE: previous anchor
+	// KMALLOC(km, f, n); // NOTE: score
+	KMALLOC(km, v, n); // NOTE: max score upto i
+	KCALLOC(km, t, n); // NOTE: used to track if it is a predecessor of an anchor already chained to
+
+    // NOTE: t is not use, v is updated, f & p are inputs, n_u & n_v are outputs.
+	u = mg_chain_backtrack(km, n, f, p, v, t, min_cnt, min_sc, max_drop, &n_u, &n_v);
+	*n_u_ = n_u, *_u = u; // NB: note that u[] may not be sorted by score here
+
+	kfree(km, p); kfree(km, f); kfree(km, t);
+	if (n_u == 0) {
+		kfree(km, a); kfree(km, v);
+		return 0;
+	}
+	return compact_a(km, n_u, u, n_v, v, a);
 }

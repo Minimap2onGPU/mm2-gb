@@ -53,8 +53,6 @@ extern "C" {
 typedef __int32_t int32_t;
 
 /* pltasks declaration */
-int64_t *get_p(int64_t n, int i);
-int32_t *get_f(int64_t n, int i);
 int pltask_init(int num_threads, int num_seqs);
 size_t pltask_append(int64_t n, mm128_t *a, int i);
 int pltask_launch(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter,
