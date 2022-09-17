@@ -11,14 +11,6 @@
 #include "bseq.h"
 #include "khash.h"
 
-// i = __sync_fetch_and_add(i, delta); // NOTE: atomic add, i starts from thread_idx
-int total_frags = 0;
-int total_tasks = 0;
-int max_awaiting_tasks = 0;
-int awaiting_tasks = 0;
-pthread_mutex_t pltask_lock; // lock for task append
-pthread_cond_t pltask_cv;
-
 struct mm_tbuf_s {
 	void *km;
 	int rep_len, frag_gap;
@@ -290,27 +282,17 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	chn_pen_gap  = opt->chain_gap_scale * 0.01 * mi->k;
 	chn_pen_skip = opt->chain_skip_scale * 0.01 * mi->k;
 
-    pthread_mutex_lock(&pltask_lock);
-    awaiting_tasks ++; 
-    total_tasks ++;
-    if (awaiting_tasks == max_awaiting_tasks || total_tasks == total_frags) { // TODO: when it is not a multiple of n_threads
-        fprintf(stderr, "[M: %s] Launch chaining kernel\n", __func__);
-        awaiting_tasks = 0;
-        pthread_cond_broadcast(&pltask_cv);
-    } else {
-        pthread_cond_wait(&pltask_cv, &pltask_lock);
-    }
-    pthread_mutex_unlock(&pltask_lock);
-    fprintf(stderr, "[M: %s] ready to continue\n", __func__);
-
-	if (opt->flag & MM_F_RMQ) {
-		a = mg_lchain_rmq(opt->max_gap, opt->rmq_inner_dist, opt->bw, opt->max_chain_skip, opt->rmq_size_cap, opt->min_cnt, opt->min_chain_score,
-						  chn_pen_gap, chn_pen_skip, n_a, a, &n_regs0, &u, b->km);
-	} else {
-		// NOTE: chaining first called here
-		a = mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
+	a = mg_plchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
 						 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
-	}
+
+	// if (opt->flag & MM_F_RMQ) {
+	// 	a = mg_lchain_rmq(opt->max_gap, opt->rmq_inner_dist, opt->bw, opt->max_chain_skip, opt->rmq_size_cap, opt->min_cnt, opt->min_chain_score,
+	// 					  chn_pen_gap, chn_pen_skip, n_a, a, &n_regs0, &u, b->km);
+	// } else {
+	// 	// NOTE: chaining first called here
+	// 	a = mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
+	// 					 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
+	// }
 
 	// fprintf(stderr, "[M: %s] done major chaining\n", __func__);
 
@@ -597,8 +579,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		} else free(s);
     } else if (step == 1) { // step 1: map
 		fprintf(stderr, "[M: %s] kt_for %d segs %d parts, %d threads\n", __func__, ((step_t*)in)->n_frag, p->n_parts, p->n_threads);
-        max_awaiting_tasks = p->n_threads; // NOTE: max_awiting tasks should be equal to n_threads
-        total_frags = ((step_t*)in)->n_frag;
+		pltask_init(p->n_threads, ((step_t*)in)->n_frag);
 		if (p->n_parts > 0) merge_hits((step_t*)in);
 		// NOTE: allocate threads for worker, n_threads is input of mm_map_file_frag()
 		else kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
