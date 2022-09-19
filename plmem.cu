@@ -5,6 +5,7 @@
 #include "plchain.h"
 #include "debug.h"
 #include <time.h>
+#include "plkernels.cu"
 
 hostMemPtr host_mem_ptrs[NUM_STREAMS];
 deviceMemPtr device_mem_ptrs[NUM_STREAMS];
@@ -23,9 +24,6 @@ size_t total_n = 0; // NOTE: index where the array is stored
 int size = 0;
 int grid_dim = 0;
 int cut_num = 0;
-
-// TODO: put this into plscore?
-__constant__ Misc misc;
 
 int64_t *get_p(int64_t n, size_t index) {
     uint16_t *rel = host_mem_ptrs[0].p+index;
@@ -48,6 +46,8 @@ int pltask_init(int num_threads, int num_seqs) {
     size = num_threads;
     max_awaiting_tasks = num_threads;
     total_frags = num_seqs;
+    pthread_mutex_init(&pltask_lock, 0);
+	pthread_cond_init(&pltask_cv, 0);
     // NOTE: allocate pin memory for each stream
     size_t avail_mem_stream = MEM_GPU;
     avail_mem_stream = MEM_GPU/NUM_STREAMS * 1e9; // split memory for each stream
@@ -88,14 +88,23 @@ int pltask_init(int num_threads, int num_seqs) {
     return 0;
 }
 
-size_t pltask_append(int64_t n, mm128_t *a, int i) {  
+size_t pltask_append(int64_t n, mm128_t *a, int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter,
+    float chn_pen_gap, float chn_pen_skip, int is_cdna, int n_seg) {  
     // NOTE: This function must be called inside a critical section
-    // FIXME: so far i is never used 
+
+    pthread_mutex_lock(&pltask_lock);
+    awaiting_tasks ++; 
+    total_tasks ++;
 
     // record how many anchors appended
+    size_t key = total_n;
     size_t idx = total_n;
     total_n += n;
 
+    if (max_dist_x < bw) max_dist_x = bw;
+	if (max_dist_y < bw && !is_cdna) max_dist_y = bw;
+
+    // copy data to pinned memory
     hostMemPtr *host_mem_ptr = host_mem_ptrs + 0;
     deviceMemPtr *device_mem_ptr = device_mem_ptrs + 0;
 
@@ -124,12 +133,31 @@ size_t pltask_append(int64_t n, mm128_t *a, int i) {
         ++idx;
     }
 
-    return total_n-n;
+    if (awaiting_tasks == max_awaiting_tasks || total_tasks == total_frags) { // TODO: when it is not a multiple of n_threads
+        fprintf(stderr, "[M: %s] Launch chaining kernel\n", __func__);
+        Misc misc_info;
+        misc_info.bw = bw;
+        misc_info.max_skip = max_skip;
+        misc_info.max_iter = max_iter;
+        misc_info.max_dist_x = max_dist_x;
+        misc_info.max_dist_y = max_dist_y;
+        misc_info.is_cdna = is_cdna;
+        misc_info.chn_pen_gap = chn_pen_gap;
+        misc_info.chn_pen_skip = chn_pen_skip;
+        misc_info.n_seg = n_seg;
+		pltask_launch(&misc_info);
+        awaiting_tasks = 0;
+        pthread_cond_broadcast(&pltask_cv);
+    } else {
+        pthread_cond_wait(&pltask_cv, &pltask_lock);
+    }
+    pthread_mutex_unlock(&pltask_lock);
+
+    fprintf(stderr, "[M: %s] ready to continue\n", __func__);
+    return key;
 }
 
-int pltask_launch(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter,
-    float chn_pen_gap, float chn_pen_skip, int is_cdna,
-    int n_seg) {
+int pltask_launch(Misc *misc_info) {
 
     hostMemPtr *host_mem_ptr = host_mem_ptrs;
     deviceMemPtr *device_mem_ptr = device_mem_ptrs;
@@ -151,22 +179,7 @@ int pltask_launch(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_
                                                                 device_mem_ptr->d_range, device_mem_ptr->d_cut, device_mem_ptr->d_cut_start_idx);
     cudaCheck();
 
-    Misc misc_info;
-    misc_info.bw = bw;
-    misc_info.max_skip = max_skip;
-    misc_info.max_iter = max_iter;
-    misc_info.max_dist_x = max_dist_x;
-    misc_info.max_dist_y = max_dist_y;
-    misc_info.is_cdna = is_cdna;
-    misc_info.chn_pen_gap = chn_pen_gap;
-    misc_info.chn_pen_skip = chn_pen_skip;
-    misc_info.n_seg = n_seg;
-
-    #ifdef USEHIP
-    hipMemcpyToSymbol(HIP_SYMBOL(misc), &misc_info, sizeof(Misc), 0, cudaMemcpyHostToDevice);
-    #else
-    cudaMemcpyToSymbol(misc, &misc_info, sizeof(Misc), 0, cudaMemcpyHostToDevice);
-    #endif
+    upload_misc(misc_info);
 
     cudaCheck();
     int griddim = (cut_num-1)/NUM_SEG_PER_BLOCK + 1;
@@ -188,59 +201,3 @@ int pltask_launch(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_
 }
 
 
-mm128_t *mg_plchain_dp(
-    int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter,
-    int min_cnt, int min_sc, float chn_pen_gap, float chn_pen_skip, int is_cdna,
-    int n_seg, int64_t n,  // NOTE: n is number of anchors
-    mm128_t *a,            // NOTE: a is ptr to anchors.
-    int *n_u_, uint64_t **_u,
-    void *km) {  // TODO: make sure this works when n has more than 32 bits
-
-    pthread_mutex_lock(&pltask_lock);
-	size_t key = pltask_append(n, a, awaiting_tasks); // NOTE: append anchors to pin memory, and get the key to result
-    awaiting_tasks ++; 
-    total_tasks ++;
-
-    if (_u) *_u = 0, *n_u_ = 0;
-	if (n == 0 || a == 0) {
-		kfree(km, a);
-		return 0;
-	}
-    if (max_dist_x < bw) max_dist_x = bw;
-	if (max_dist_y < bw && !is_cdna) max_dist_y = bw;
-
-    if (awaiting_tasks == size || total_tasks == total_frags) { // TODO: when it is not a multiple of n_threads
-        fprintf(stderr, "[M: %s] Launch chaining kernel\n", __func__);
-		pltask_launch(max_dist_x, max_dist_y, bw, max_skip, max_iter, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
-        awaiting_tasks = 0;
-        pthread_cond_broadcast(&pltask_cv);
-    } else {
-        pthread_cond_wait(&pltask_cv, &pltask_lock);
-    }
-    pthread_mutex_unlock(&pltask_lock);
-    fprintf(stderr, "[M: %s] ready to continue\n", __func__);
-
-    int64_t *p = get_p(n, key);
-    int32_t *f = get_f(n, key); // get results from pin memory
-
-    int32_t *t, *v, n_u, n_v, mmax_f = 0, max_drop = bw;
-	uint64_t *u;
-
-	// max_skip = INT32_MAX; // FIXME: no skip limitation for test purpose
-	
-	// KMALLOC(km, p, n); // NOTE: previous anchor
-	// KMALLOC(km, f, n); // NOTE: score
-	KMALLOC(km, v, n); // NOTE: max score upto i
-	KCALLOC(km, t, n); // NOTE: used to track if it is a predecessor of an anchor already chained to
-
-    // NOTE: t is not use, v is updated, f & p are inputs, n_u & n_v are outputs.
-	u = mg_chain_backtrack(km, n, f, p, v, t, min_cnt, min_sc, max_drop, &n_u, &n_v);
-	*n_u_ = n_u, *_u = u; // NB: note that u[] may not be sorted by score here
-
-	kfree(km, p); kfree(km, f); kfree(km, t);
-	if (n_u == 0) {
-		kfree(km, a); kfree(km, v);
-		return 0;
-	}
-	return compact_a(km, n_u, u, n_v, v, a);
-}

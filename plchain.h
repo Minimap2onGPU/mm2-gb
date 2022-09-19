@@ -50,20 +50,27 @@ extern "C" {
 #define NUM_ANCHOR_IN_SMEM 3072
 #define NUM_STREAMS 1
 
+
+
 typedef __int32_t int32_t;
+typedef __int64_t int64_t;
 
 /* pltasks declaration */
 int pltask_init(int num_threads, int num_seqs);
-size_t pltask_append(int64_t n, mm128_t *a, int i);
-int pltask_launch(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter,
+size_t pltask_append(int64_t n, mm128_t *a, int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter,
     float chn_pen_gap, float chn_pen_skip, int is_cdna, int n_seg);
+int pltask_launch(Misc *misc_info);
 
-mm128_t *mg_plchain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter,
+mm128_t *mg_plchain_dp(
+    int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter,
     int min_cnt, int min_sc, float chn_pen_gap, float chn_pen_skip, int is_cdna,
     int n_seg, int64_t n,  // NOTE: n is number of anchors
     mm128_t *a,            // NOTE: a is ptr to anchors.
     int *n_u_, uint64_t **_u,
     void *km);
+
+int64_t *get_p(int64_t n, size_t index);
+int32_t *get_f(int64_t n, size_t index);
 
 
 /* functions declaration */
