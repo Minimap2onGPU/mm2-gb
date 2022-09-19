@@ -69,7 +69,7 @@ mm128_t *mg_plchain_dp(
     int *n_u_, uint64_t **_u,
     void *km);
 
-int64_t *get_p(int64_t n, size_t index);
+int64_t *get_p(int64_t *p, int64_t n, size_t index);
 int32_t *get_f(int64_t n, size_t index);
 
 

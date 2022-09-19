@@ -411,10 +411,8 @@ mm128_t *mg_plchain_dp(
 
 	size_t key = pltask_append(n, a, max_dist_x, max_dist_y, bw, max_skip, max_iter, chn_pen_gap, chn_pen_skip, is_cdna, n_seg); // NOTE: append anchors to pin memory, and get the key to result
 
-    int64_t *p = get_p(n, key);
-    int32_t *f = get_f(n, key); // get results from pin memory
-
-    int32_t *t, *v, n_u, n_v, mmax_f = 0, max_drop = bw;
+	int64_t *p;
+    int32_t *f, *t, *v, n_u, n_v, mmax_f = 0, max_drop = bw;
 	uint64_t *u;
 
 	if (_u) *_u = 0, *n_u_ = 0;
@@ -423,14 +421,21 @@ mm128_t *mg_plchain_dp(
 		return 0;
 	}
 
+	KMALLOC(km, p, n);
+	// KMALLOC(km, f, n);
 	KMALLOC(km, v, n); // NOTE: max score up to i
 	KCALLOC(km, t, n); // NOTE: used to track if it is a predecessor of an anchor already chained to
+
+    p = get_p(p, n, key);
+    f = get_f(n, key); // get results from pin memory
 
     // NOTE: t is not use, v is updated, f & p are inputs, n_u & n_v are outputs.
 	u = mg_chain_backtrack(km, n, f, p, v, t, min_cnt, min_sc, max_drop, &n_u, &n_v);
 	*n_u_ = n_u, *_u = u; // NB: note that u[] may not be sorted by score here
 
-	kfree(km, p); kfree(km, f); kfree(km, t);
+	kfree(km, p); 
+	// kfree(km, f); 
+	kfree(km, t);
 	if (n_u == 0) {
 		kfree(km, a); kfree(km, v);
 		return 0;

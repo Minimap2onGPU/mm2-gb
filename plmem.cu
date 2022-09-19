@@ -25,9 +25,9 @@ int size = 0;
 int grid_dim = 0;
 int cut_num = 0;
 
-int64_t *get_p(int64_t n, size_t index) {
+int64_t *get_p(int64_t *p, int64_t n, size_t index) {
     uint16_t *rel = host_mem_ptrs[0].p+index;
-    int64_t* p = (int64_t*)malloc(sizeof(int64_t)*n);
+    if (!p) int64_t* p = (int64_t*)malloc(sizeof(int64_t)*n);
     for (int i = 0; i < n; ++i) {
         if (rel[i] == 0)
             p[i] = -1;
