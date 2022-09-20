@@ -22,6 +22,7 @@ extern char binary_range[];
 int debug_chain_loop(int forward_chaining, int use_gpu);
 int debug_stream_chain_loop();
 int debug_dynamic_stream_chain_loop();
+void debug_compact_anchors(mm128_t *a, int64_t n);
 
 // check loop declaration
 int is_debug_range();

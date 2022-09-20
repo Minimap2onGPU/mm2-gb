@@ -93,8 +93,8 @@ size_t pltask_append(int64_t n, mm128_t *a, int max_dist_x, int max_dist_y, int 
     // NOTE: This function must be called inside a critical section
 
     pthread_mutex_lock(&pltask_lock);
-    awaiting_tasks ++; 
-    total_tasks ++;
+    awaiting_tasks++; 
+    total_tasks++;
 
     // record how many anchors appended
     size_t key = total_n;
@@ -134,7 +134,7 @@ size_t pltask_append(int64_t n, mm128_t *a, int max_dist_x, int max_dist_y, int 
     }
 
     if (awaiting_tasks == max_awaiting_tasks || total_tasks == total_frags) { // TODO: when it is not a multiple of n_threads
-        fprintf(stderr, "[M: %s] Launch chaining kernel\n", __func__);
+        fprintf(stderr, "[M: %s] Launch chaining kernel with %d seqs\n", __func__, awaiting_tasks);
         Misc misc_info;
         misc_info.bw = bw;
         misc_info.max_skip = max_skip;
@@ -175,6 +175,7 @@ int pltask_launch(Misc *misc_info) {
     cudaMemset(device_mem_ptr->d_cut, 0xff, sizeof(size_t)*cut_num);
     cudaCheck();
 
+    fprintf(stderr, "[M: %s] Launch range selection\n", __func__);
     range_selection_kernel_naive<<<DimGrid0, DimBlock0>>>(device_mem_ptr->d_ax, device_mem_ptr->d_start_idx, device_mem_ptr->d_read_end_idx, 
                                                                 device_mem_ptr->d_range, device_mem_ptr->d_cut, device_mem_ptr->d_cut_start_idx);
     cudaCheck();
@@ -185,6 +186,7 @@ int pltask_launch(Misc *misc_info) {
     int griddim = (cut_num-1)/NUM_SEG_PER_BLOCK + 1;
     dim3 DimBlock1(NUM_THREADS_SCORE, 1, 1);
     dim3 DimGrid1(griddim, 1, 1);
+    fprintf(stderr, "[M: %s] Launch score generation\n", __func__);
     score_generation_naive<<<DimGrid1, DimBlock1>>>(device_mem_ptr->d_ax, device_mem_ptr->d_ay, device_mem_ptr->d_range, 
                                             device_mem_ptr->d_cut, device_mem_ptr->d_f, device_mem_ptr->d_p, total_n, cut_num);
     cudaCheck();

@@ -10,6 +10,7 @@
 #include "mmpriv.h"
 #include "bseq.h"
 #include "khash.h"
+#include "debug.h"
 
 struct mm_tbuf_s {
 	void *km;
@@ -284,7 +285,7 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 
 	a = mg_plchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
 						 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
-
+	
 	// if (opt->flag & MM_F_RMQ) {
 	// 	a = mg_lchain_rmq(opt->max_gap, opt->rmq_inner_dist, opt->bw, opt->max_chain_skip, opt->rmq_size_cap, opt->min_cnt, opt->min_chain_score,
 	// 					  chn_pen_gap, chn_pen_skip, n_a, a, &n_regs0, &u, b->km);
@@ -430,7 +431,7 @@ typedef struct {
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
 {
 	// NOTE: mm_map called from here -> chaining
-	fprintf(stderr, "[M: %s] work on seg %ld\n", __func__, i);
+	// fprintf(stderr, "[M: %s] work on seg %ld\n", __func__, i);
     step_t *s = (step_t*)_data;
 	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
 	const char *qseqs[MM_MAX_SEG];

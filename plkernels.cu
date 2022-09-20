@@ -234,7 +234,7 @@ __global__ void score_generation_naive(const int64_t* anchors_x, const int64_t* 
         segid++;
     }
     // if (tid == 0) {
-    //     printf("bid=%d %d - %d\n", bid, start_idx, end_idx);
+    //     printf("bid=%d %zu - %zu\n", bid, start_idx, end_idx);
     // }
 
     Misc blk_misc = misc[0];

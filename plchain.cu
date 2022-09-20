@@ -440,6 +440,10 @@ mm128_t *mg_plchain_dp(
 		kfree(km, a); kfree(km, v);
 		return 0;
 	}
-	return compact_a(km, n_u, u, n_v, v, a);
+
+	mm128_t *b = compact_a(km, n_u, u, n_v, v, a);
+	debug_compact_anchors(b, n_v);
+
+	return b;
 }
 

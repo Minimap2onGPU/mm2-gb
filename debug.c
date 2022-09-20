@@ -7,8 +7,23 @@
 #include "plchain.h"
 #include <time.h>
 
-const char *filename = "debug/chain_in_output";
+const char *filename = "Log/chain_in_output";
+const char *anchors_filename = "Log/anchors_results";
 FILE *output = NULL;
+FILE *anchors_output = NULL;
+
+void debug_compact_anchors(mm128_t *a, int64_t n) {
+    if (anchors_output == NULL) {
+        if ((anchors_output = fopen(anchors_filename, "w+")) == NULL) {
+            fprintf(stderr, "[Debug]: %s can't be opened\n", anchors_filename);
+            exit(0);
+        }
+    }
+    fprintf(anchors_output, "[Debug]: \n");
+    for (int i=0; i < n; ++i) {
+        fprintf(anchors_output, "Anchor %d, x %ld y %ld\n", i, a[i].x, a[i].y);
+    }
+}
 
 void debug_print(int32_t *f, int32_t *t, int32_t *v, int64_t *p, int64_t n) {
     printf("[Debug]: \n");
