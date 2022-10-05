@@ -291,8 +291,8 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	// debug_compare_chain_output(a, temp_a, u, n_a);
 	// kfree(b->km, a);
 
-	temp_a = mg_plchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
-						 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, temp_a, &temp_n_regs0, &temp_u, b->km);
+	// temp_a = mg_plchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
+						//  chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, temp_a, &temp_n_regs0, &temp_u, b->km);
 	
 	a = mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
 						 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
@@ -300,11 +300,16 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	// a = temp_a;
 	// n_regs0 = temp_n_regs0;
 	// u = temp_u;
+	// if (n_regs0 != temp_n_regs0) {
+	// 	fprintf(stderr, "[M: %s] n_regs %d != temp_n_regs %d\n", __func__, n_regs0, temp_n_regs0);
+	// 	// assert(n_regs0 == temp_n_regs0);
+	// 	exit(0);
+	// }
 
-	// // Compare the output
+	// Compare the output
 	// debug_compare_chain_output(a, temp_a, u, temp_u, n_regs0);
 	kfree(b->km, temp_a);
-	kfree(b->km, temp_u);
+	// kfree(b->km, temp_u);
 
 	fprintf(stderr, "[M: %s] done major chaining\n", __func__);
 

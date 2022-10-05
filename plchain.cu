@@ -413,8 +413,8 @@ mm128_t *mg_plchain_dp(
     int *n_u_, uint64_t **_u,
     void *km) {  // TODO: make sure this works when n has more than 32 bits
 
-	size_t key = pltask_append(n, a, max_dist_x, max_dist_y, bw, max_skip, max_iter, chn_pen_gap, chn_pen_skip, is_cdna, n_seg); // NOTE: append anchors to pin memory, and get the key to result
-
+	max_skip = INT32_MAX; // FIXME: no skip limitation for test purpose
+	
 	int64_t *p;
     int32_t *f, *t, *v, n_u, n_v, mmax_f = 0, max_drop = bw;
 	uint64_t *u;
@@ -425,10 +425,16 @@ mm128_t *mg_plchain_dp(
 		return 0;
 	}
 
+	if (max_dist_x < bw) max_dist_x = bw;
+	if (max_dist_y < bw && !is_cdna) max_dist_y = bw;
+	if (is_cdna) max_drop = INT32_MAX;
+
 	KMALLOC(km, p, n);
 	KMALLOC(km, f, n);
 	KMALLOC(km, v, n); // NOTE: max score up to i
 	KCALLOC(km, t, n); // NOTE: used to track if it is a predecessor of an anchor already chained to
+
+	size_t key = pltask_append(n, a, max_dist_x, max_dist_y, bw, max_skip, max_iter, chn_pen_gap, chn_pen_skip, is_cdna, n_seg); // NOTE: append anchors to pin memory, and get the key to result
 
     p = get_p(p, n, key);
     f = get_f(f, n, key); // get results from pin memory
