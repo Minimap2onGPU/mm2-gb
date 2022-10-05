@@ -110,7 +110,8 @@ static mm128_t *compact_a(void *km, int32_t n_u, uint64_t *u, int32_t n_v, int32
 	}
 	memcpy(u, u2, n_u * 8);
 	memcpy(b, a, k * sizeof(mm128_t)); // write _a_ to _b_ and deallocate _a_ because _a_ is oversized, sometimes a lot
-	kfree(km, a); kfree(km, w); kfree(km, u2);
+	kfree(km, a); 
+	kfree(km, w); kfree(km, u2);
 	return b;
 }
 
@@ -182,6 +183,7 @@ mm128_t *mg_lchain_dp(
 	debug_chain_input(a, n, max_iter, max_dist_x, max_dist_y, max_skip,\
                         bw, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
 	#endif // DEBUG_INPUT
+	fprintf(stderr, "[M: %s] enter backward chaining\n", __func__);
 
 	// fill the score and backtrack arrays
 	for (i = 0, max_ii = -1; i < n; ++i) { 
@@ -231,6 +233,7 @@ mm128_t *mg_lchain_dp(
 			max_ii = i;
 		if (mmax_f < max_f) mmax_f = max_f;
 	}
+	fprintf(stderr, "[M: %s] enter backtracking\n", __func__);
 
 	// NOTE: t is not use, v is updated, f & p are inputs, n_u & n_v are outputs.
 	u = mg_chain_backtrack(km, n, f, p, v, t, min_cnt, min_sc, max_drop, &n_u, &n_v);
@@ -245,6 +248,7 @@ mm128_t *mg_lchain_dp(
 		kfree(km, a); kfree(km, v);
 		return 0;
 	}
+	fprintf(stderr, "[M: %s] done backward chaining\n", __func__);
 	return compact_a(km, n_u, u, n_v, v, a);
 }
 

@@ -286,22 +286,35 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	// a = mg_plchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
 						//  chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
 
-	a = forward_chain_cpu(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
-						 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
+	int temp_n_regs0 = n_regs0;
+	uint64_t *temp_u;
+	mm128_t* temp_a;
+	KMALLOC(b->km, temp_a, n_a);
+	memcpy(temp_a, a, n_a * sizeof(mm128_t));
+	// debug_compare_chain_output(a, temp_a, u, n_a);
+	// kfree(b->km, a);
+
+	temp_a = forward_chain_cpu(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
+						 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, temp_a, &temp_n_regs0, &temp_u, b->km);
 	
-	// if (opt->flag & MM_F_RMQ) {
-	// 	a = mg_lchain_rmq(opt->max_gap, opt->rmq_inner_dist, opt->bw, opt->max_chain_skip, opt->rmq_size_cap, opt->min_cnt, opt->min_chain_score,
-	// 					  chn_pen_gap, chn_pen_skip, n_a, a, &n_regs0, &u, b->km);
-	// } else {
-	// 	// NOTE: chaining first called here
-	// 	a = mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
-	// 					 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
-	// }
+	if (opt->flag & MM_F_RMQ) {
+		a = mg_lchain_rmq(opt->max_gap, opt->rmq_inner_dist, opt->bw, opt->max_chain_skip, opt->rmq_size_cap, opt->min_cnt, opt->min_chain_score,
+						  chn_pen_gap, chn_pen_skip, n_a, a, &n_regs0, &u, b->km);
+	} else {
+		// NOTE: chaining first called here
+		a = mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
+						 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
+	}
+	// a = temp_a;
+	// n_regs0 = temp_n_regs0;
+	// u = temp_u;
 
-	// Compare the output
-	// debug_compare_chain_output(a, a_temp, u, n_regs0);
+	// // Compare the output
+	// debug_compare_chain_output(a, temp_a, u, n_regs0);
+	kfree(b->km, temp_a);
+	kfree(b->km, temp_u);
 
-	// fprintf(stderr, "[M: %s] done major chaining\n", __func__);
+	fprintf(stderr, "[M: %s] done major chaining\n", __func__);
 
 	if (opt->bw_long > opt->bw && (opt->flag & (MM_F_SPLICE|MM_F_SR|MM_F_NO_LJOIN)) == 0 && n_segs == 1 && n_regs0 > 1) { // re-chain/long-join for long sequences
 		int32_t st = (int32_t)a[0].y, en = (int32_t)a[(int32_t)u[0] - 1].y;
