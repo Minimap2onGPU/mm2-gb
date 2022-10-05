@@ -94,7 +94,7 @@ size_t pltask_append(int64_t n, mm128_t *a, int max_dist_x, int max_dist_y, int 
 
     pthread_mutex_lock(&pltask_lock);
     awaiting_tasks++; 
-    total_tasks++;
+    int task_id = total_tasks++;
 
     // record how many anchors appended
     size_t key = total_n;
@@ -134,7 +134,7 @@ size_t pltask_append(int64_t n, mm128_t *a, int max_dist_x, int max_dist_y, int 
     }
 
     if (awaiting_tasks == max_awaiting_tasks || total_tasks == total_frags) { // TODO: when it is not a multiple of n_threads
-        fprintf(stderr, "[M: %s] Launch chaining kernel with %d seqs\n", __func__, awaiting_tasks);
+        fprintf(stderr, "[M: %s] Launch chaining kernel with %d seqs, %d / %d\n", __func__, awaiting_tasks, total_tasks, total_frags);
         Misc misc_info;
         misc_info.bw = bw;
         misc_info.max_skip = max_skip;
@@ -153,7 +153,7 @@ size_t pltask_append(int64_t n, mm128_t *a, int max_dist_x, int max_dist_y, int 
     }
     pthread_mutex_unlock(&pltask_lock);
 
-    fprintf(stderr, "[M: %s] ready to continue\n", __func__);
+    fprintf(stderr, "[M: %s] ready to continue, %d / %d\n", __func__, task_id, total_frags);
     return key;
 }
 
@@ -194,6 +194,8 @@ int pltask_launch(Misc *misc_info) {
     // copy f and p back to host
     cudaMemcpy(host_mem_ptr->f, device_mem_ptr->d_f, sizeof(int32_t)*total_n, cudaMemcpyDeviceToHost);
     cudaMemcpy(host_mem_ptr->p, device_mem_ptr->d_p, sizeof(uint16_t)*total_n, cudaMemcpyDeviceToHost);
+
+    // cuda sync device
     
     // NOTE: reset the grid size 
     grid_dim = 0;

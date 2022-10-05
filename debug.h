@@ -23,6 +23,7 @@ int debug_chain_loop(int forward_chaining, int use_gpu);
 int debug_stream_chain_loop();
 int debug_dynamic_stream_chain_loop();
 void debug_compact_anchors(mm128_t *a, int64_t n);
+void debug_compare_chain_output(mm128_t *a, mm128_t *a_temp, uint64_t *u, int n_regs);
 
 // check loop declaration
 int is_debug_range();

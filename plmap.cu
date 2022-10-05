@@ -283,7 +283,10 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	chn_pen_gap  = opt->chain_gap_scale * 0.01 * mi->k;
 	chn_pen_skip = opt->chain_skip_scale * 0.01 * mi->k;
 
-	a = mg_plchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
+	// a = mg_plchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
+						//  chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
+
+	a = forward_chain_cpu(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
 						 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
 	
 	// if (opt->flag & MM_F_RMQ) {
@@ -294,6 +297,9 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	// 	a = mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
 	// 					 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
 	// }
+
+	// Compare the output
+	// debug_compare_chain_output(a, a_temp, u, n_regs0);
 
 	// fprintf(stderr, "[M: %s] done major chaining\n", __func__);
 

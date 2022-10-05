@@ -122,7 +122,10 @@ static void mm_fix_cigar(mm_reg1_t *r, const uint8_t *qseq, const uint8_t *tseq,
 			toff += len;
 		}
 	}
-	assert(qoff == r->qe - r->qs && toff == r->re - r->rs);
+	// FIXME: assertion fault here
+	// assert(qoff == r->qe - r->qs && toff == r->re - r->rs);
+	assert(qoff == r->qe - r->qs);
+	assert(toff == r->re - r->rs);
 	for (k = 0; k < p->n_cigar - 2; ++k) { // fix CIGAR like 5I6D7I
 		if ((p->cigar[k]&0xf) > 0 && (p->cigar[k]&0xf) + (p->cigar[k+1]&0xf) == 3) {
 			uint32_t l, s[3] = {0,0,0};
@@ -284,7 +287,10 @@ static void mm_update_extra(mm_reg1_t *r, const uint8_t *qseq, const uint8_t *ts
 		}
 	}
 	p->dp_max = (int32_t)(max + .499);
-	assert(qoff == r->qe - r->qs && toff == r->re - r->rs);
+	// FIXME: assertion fault here
+	// assert(qoff == r->qe - r->qs && toff == r->re - r->rs);
+	assert(qoff == r->qe - r->qs); //  pass
+	assert(toff == r->re - r->rs);
 	if (is_eqx) mm_update_cigar_eqx(r, qseq, tseq); // NB: it has to be called here as changes to qseq and tseq are not returned
 }
 

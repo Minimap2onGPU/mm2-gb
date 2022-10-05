@@ -80,5 +80,15 @@ void debug_chain_compute_sc(mm128_t *a, int64_t n, int max_dist_x, int max_iter)
 
 }
 
+void debug_compare_chain_output(mm128_t *a, mm128_t *a_temp, uint64_t *u, int n_regs) {
+    int n_a = 0;
+    for (int i = 0; i < n_regs; ++i) n_a += (int32_t)u[i]; // recompute compact a size
+
+    for (int i = 0; i < n_a; i++) {
+        assert(a[i].x == a_temp[i].x);
+        assert(a[i].y == a_temp[i].y);
+    }
+}
+
 
 

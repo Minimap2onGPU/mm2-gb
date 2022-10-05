@@ -447,3 +447,153 @@ mm128_t *mg_plchain_dp(
 	return b;
 }
 
+mm128_t *forward_chain_cpu(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter,
+    int min_cnt, int min_sc, float chn_pen_gap, float chn_pen_skip, int is_cdna,
+    int n_seg, int64_t n,  // NOTE: n is number of anchors
+    mm128_t *a,            // NOTE: a is ptr to anchors.
+    int *n_u_, uint64_t **_u,
+    void *km) { 
+
+	int64_t *p;
+    int32_t *f, *t, *v, n_u, n_v, mmax_f = 0, max_drop = bw;
+    int32_t *range;  // successor range
+	uint64_t *u;
+
+	if (_u) *_u = 0, *n_u_ = 0;
+	if (n == 0 || a == 0) {
+		kfree(km, a);
+		return 0;
+	}
+
+	fprintf(stderr, "[M: %s] enter forward chaining\n", __func__);
+
+	KMALLOC(km, p, n);
+	KMALLOC(km, f, n);
+	KMALLOC(km, v, n); // NOTE: max score up to i
+	KCALLOC(km, t, n); // NOTE: used to track if it is a predecessor of an anchor already chained to
+
+	if (max_dist_x < bw) max_dist_x = bw;
+    if (max_dist_y < bw && !is_cdna) max_dist_y = bw;
+	if (is_cdna) max_drop = INT32_MAX;
+
+    /* range selection outputs */
+	KMALLOC(km, range, n);
+
+    /* score calculation outputs */
+    for (int i = 0; i < n; ++i) {
+        f[i] = a[i].y >> 32 & 0xff; // length of anchor
+        p[i] = -1;
+    }
+
+    /* range selection */
+    forward_range_selection_cpu_binary(a, n, max_dist_x, 5000, range); // max_iter = 4096
+
+    /* score calculation */
+    forward_score_cpu(a, n, range, max_dist_x, max_dist_y, bw, chn_pen_gap,
+                      chn_pen_skip, is_cdna, n_seg, f, p);
+
+	// NOTE: t is not use, v is updated, f & p are inputs, n_u & n_v are outputs.
+	u = mg_chain_backtrack(km, n, f, p, v, t, min_cnt, min_sc, max_drop, &n_u, &n_v);
+	*n_u_ = n_u, *_u = u; // NB: note that u[] may not be sorted by score here
+
+	kfree(km, p); 
+	kfree(km, f); 
+	kfree(km, t);
+	kfree(km, range);
+	if (n_u == 0) {
+		kfree(km, a); kfree(km, v);
+		return 0;
+	}
+
+	mm128_t *b = compact_a(km, n_u, u, n_v, v, a);
+	// debug_compact_anchors(b, n_v);
+	fprintf(stderr, "[M: %s] done forward chaining\n", __func__);
+
+	return b;
+}
+
+inline int64_t binary_search(mm128_t* a, int max_dist_x, int64_t i, int64_t start){
+    int64_t st_high = start, st_low=i;
+    while (st_high != st_low) {
+        int64_t mid = (st_high + st_low -1) / 2+1;
+        if (a[i].x >> 32 != a[mid].x >> 32 ||
+            a[mid].x > a[i].x + max_dist_x) {
+            st_high = mid - 1;
+        } else {
+            st_low = mid;
+        }
+    }
+    return st_high;
+}
+
+void forward_range_selection_cpu_binary(mm128_t* a, int64_t n, int max_dist_x,
+                                 int max_iter,  // input  max_detection_range
+                                 int32_t* range) {  // output
+    int64_t i;
+    int range_op[7] = {16, 512, 1024, 2048, 3072, 4096, max_iter};  // Range Options
+    for (i = 0; i < n; ++i) {
+        int64_t st;
+        for (int j = 0; j < 7; ++j) {
+            st = i + range_op[j] < n ? i + range_op[j] : n - 1;
+            if (st > i &&
+                (a[i].x >> 32 != a[st].x >> 32 ||
+                 a[st].x > a[i].x + max_dist_x)) {  // Find the smallest range
+                                                    // with a too large gap
+                break;
+            }
+        }
+        st = binary_search(a, max_dist_x, i, st);
+        range[i] = st - i;
+    }  // iterate through all anchors
+}
+
+void forward_range_selection_cpu(mm128_t* a, int64_t n, int max_dist_x,
+                                 int max_iter,  // input  max_detection_range
+                                 int32_t* range) {  // output
+    int64_t i;
+    int range_op[7] = {16, 512, 1024, 2048, 3072, 4096, 5000};  // Range Options
+    for (i = 0; i < n; ++i) {
+        int64_t st = i + max_iter < n ? i + max_iter : n-1;
+        for (int j = 0; j < 7; ++j) {
+            st = i + range_op[j] < n ? i + range_op[j] : n-1;
+            if (st > i && (a[i].x >> 32 != a[st].x >> 32
+                          || a[st].x > a[i].x + max_dist_x)) {  // Find the smallest range with a too large gap
+                break;
+            }
+        }
+        while (st > i && (a[i].x >> 32 != a[st].x >> 32  // NOTE: different prefix cannot become predecessor 
+                          || a[st].x > a[i].x + max_dist_x)) { // NOTE: same prefix compare the value
+            --st;
+        }
+        range[i] = st - i;
+    }  // iterate through all anchors
+}
+
+void forward_score_cpu(mm128_t* a, int64_t n  // [in] anchors
+                       ,
+                       int32_t* range  // [in] successor range
+                       ,
+                       int max_dist_x, int max_dist_y, int bw,
+                       float chn_pen_gap, float chn_pen_skip, int is_cdna,
+                       int n_seg  // [in] score function parameters
+                       ,
+                       int32_t* f,
+                       int64_t* p  // [out] score and previous anchor chained to
+) {
+    for (int64_t i = 0; i < n; ++i) {  // iterate through all anchors
+        for (int64_t j = i + 1; j <= i + range[i];
+             ++j) {  // iterate through the successor range
+            int32_t sc;
+            sc = comput_sc(&a[j], &a[i], max_dist_x, max_dist_y, bw,
+                           chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
+            if (sc == INT32_MIN) continue;
+            sc += f[i];
+            if (sc >= f[j] && sc != (a[j].y>>32 & 0xff)) {
+                f[j] = sc;
+                p[j] = i;
+            }
+        }  // j
+    }      // i
+}
+
+
