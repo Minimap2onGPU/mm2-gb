@@ -80,15 +80,20 @@ void debug_chain_compute_sc(mm128_t *a, int64_t n, int max_dist_x, int max_iter)
 
 }
 
-void debug_compare_chain_output(mm128_t *a, mm128_t *a_temp, uint64_t *u, int n_regs) {
+void debug_compare_chain_output(mm128_t *a, mm128_t *temp_a, uint64_t *u, uint64_t *temp_u, int n_regs) {
     int n_a = n_regs;
-    // for (int i = 0, n_a = 0; i < n_regs; ++i) n_a += (int32_t)u[i]; // recompute compact a size
-
-    for (int i = 0; i < n_a; i++) {
-        assert(a[i].x == a_temp[i].x);
-        assert(a[i].y == a_temp[i].y);
+    fprintf(stderr, "[M: %s] Enter correctness check, n_regs: %d !!!\n", __func__, n_regs);
+    for (int i = 0, n_a = 0; i < n_regs; ++i) {
+        assert(u[i] == temp_u[i]);
+        n_a += (int32_t)u[i]; // recompute compact a size
     }
+    // FIXME: output temp_u is wrong and need to fix (seg fault)
+
+    fprintf(stderr, "[M: %s] Start correctness check, n_a: %d !!!\n", __func__, n_a);
+    for (int i = 0; i < n_a; i++) {
+        assert(a[i].x == temp_a[i].x);
+        assert(a[i].y == temp_a[i].y);
+    }
+    fprintf(stderr, "[M: %s] Pass correctness check !!!\n", __func__);
 }
-
-
 

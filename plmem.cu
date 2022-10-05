@@ -27,7 +27,7 @@ int cut_num = 0;
 
 int64_t *get_p(int64_t *p, int64_t n, size_t index) {
     uint16_t *rel = host_mem_ptrs[0].p+index;
-    if (!p) int64_t* p = (int64_t*)malloc(sizeof(int64_t)*n);
+    // if (!p) int64_t* p = (int64_t*)malloc(sizeof(int64_t)*n);
     for (int i = 0; i < n; ++i) {
         if (rel[i] == 0)
             p[i] = -1;
@@ -37,12 +37,14 @@ int64_t *get_p(int64_t *p, int64_t n, size_t index) {
     return p; // TODO: make sure p is freed after using it
 }
 
-int32_t *get_f(int64_t n, size_t index) {
-    return host_mem_ptrs[0].f+index;
+int32_t *get_f(int32_t *f, int64_t n, size_t index) {
+    memcpy(f, host_mem_ptrs[0].f+index, n * sizeof(int32_t));
+    return f;
 }
 
 int pltask_init(int num_threads, int num_seqs) { 
 
+    fprintf(stderr, "[M: %s] Initialize pltask\n", __func__);
     size = num_threads;
     max_awaiting_tasks = num_threads;
     total_frags = num_seqs;

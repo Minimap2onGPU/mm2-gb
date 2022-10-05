@@ -426,19 +426,19 @@ mm128_t *mg_plchain_dp(
 	}
 
 	KMALLOC(km, p, n);
-	// KMALLOC(km, f, n);
+	KMALLOC(km, f, n);
 	KMALLOC(km, v, n); // NOTE: max score up to i
 	KCALLOC(km, t, n); // NOTE: used to track if it is a predecessor of an anchor already chained to
 
     p = get_p(p, n, key);
-    f = get_f(n, key); // get results from pin memory
+    f = get_f(f, n, key); // get results from pin memory
 
     // NOTE: t is not use, v is updated, f & p are inputs, n_u & n_v are outputs.
 	u = mg_chain_backtrack(km, n, f, p, v, t, min_cnt, min_sc, max_drop, &n_u, &n_v);
 	*n_u_ = n_u, *_u = u; // NB: note that u[] may not be sorted by score here
 
 	kfree(km, p); 
-	// kfree(km, f); 
+	kfree(km, f); 
 	kfree(km, t);
 	if (n_u == 0) {
 		kfree(km, a); kfree(km, v);
@@ -446,7 +446,7 @@ mm128_t *mg_plchain_dp(
 	}
 
 	mm128_t *b = compact_a(km, n_u, u, n_v, v, a);
-	debug_compact_anchors(b, n_v);
+	// debug_compact_anchors(b, n_v);
 
 	return b;
 }

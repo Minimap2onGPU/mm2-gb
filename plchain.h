@@ -70,7 +70,7 @@ mm128_t *mg_plchain_dp(
     void *km);
 
 int64_t *get_p(int64_t *p, int64_t n, size_t index);
-int32_t *get_f(int64_t n, size_t index);
+int32_t *get_f(int32_t *f,  int64_t n, size_t index);
 
 /* CPU forward chaining tasks declaration */
 mm128_t *forward_chain_cpu(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter,
