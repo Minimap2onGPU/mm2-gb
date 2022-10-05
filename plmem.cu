@@ -28,7 +28,7 @@ int cut_num = 0;
 int64_t *get_p(int64_t *p, int64_t n, size_t index) {
     uint16_t *rel = host_mem_ptrs[0].p+index;
     // if (!p) int64_t* p = (int64_t*)malloc(sizeof(int64_t)*n);
-    for (int i = 0; i < n; ++i) {
+    for (int64_t i = 0; i < n; ++i) {
         if (rel[i] == 0)
             p[i] = -1;
         else
@@ -149,6 +149,7 @@ size_t pltask_append(int64_t n, mm128_t *a, int max_dist_x, int max_dist_y, int 
         misc_info.n_seg = n_seg;
 		pltask_launch(&misc_info);
         awaiting_tasks = 0;
+        total_n = 0;
         pthread_cond_broadcast(&pltask_cv);
     } else {
         pthread_cond_wait(&pltask_cv, &pltask_lock);

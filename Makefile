@@ -20,7 +20,7 @@ CUDATESTFLAG	= -G
 ############	HIP Compile		###################
 ###################################################
 HIPCC			= hipcc
-HIPFLAGS		= -DUSEHIP
+HIPFLAGS		= -DUSEHIP -g
 HIPTESTFLAGS	= -g
 
 ###################################################
