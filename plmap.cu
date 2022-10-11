@@ -2,6 +2,7 @@
 #include <string.h>
 #include <assert.h>
 #include <errno.h>
+#include <pthread.h>
 #include "kthread.h"
 #include "kvec.h"
 #include "kalloc.h"
@@ -9,6 +10,7 @@
 #include "mmpriv.h"
 #include "bseq.h"
 #include "khash.h"
+#include "debug.h"
 
 struct mm_tbuf_s {
 	void *km;
@@ -280,16 +282,36 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 
 	chn_pen_gap  = opt->chain_gap_scale * 0.01 * mi->k;
 	chn_pen_skip = opt->chain_skip_scale * 0.01 * mi->k;
-	if (opt->flag & MM_F_RMQ) {
-		a = mg_lchain_rmq(opt->max_gap, opt->rmq_inner_dist, opt->bw, opt->max_chain_skip, opt->rmq_size_cap, opt->min_cnt, opt->min_chain_score,
-						  chn_pen_gap, chn_pen_skip, n_a, a, &n_regs0, &u, b->km);
-	} else {
-		// NOTE: chaining first called here
-		a = mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
+
+	int temp_n_regs0 = n_regs0;
+	uint64_t *temp_u;
+	mm128_t* temp_a;
+	KMALLOC(b->km, temp_a, n_a);
+	memcpy(temp_a, a, n_a * sizeof(mm128_t));
+	// debug_compare_chain_output(a, temp_a, u, n_a);
+	// kfree(b->km, a);
+
+	temp_a = mg_plchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
+						 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, temp_a, &temp_n_regs0, &temp_u, b->km);
+	
+	a = mg_lchain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score,
 						 chn_pen_gap, chn_pen_skip, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
+	
+	// a = temp_a;
+	// n_regs0 = temp_n_regs0;
+	// u = temp_u;
+	if (n_regs0 != temp_n_regs0) {
+		fprintf(stderr, "[M: %s] n_regs %d != temp_n_regs %d\n", __func__, n_regs0, temp_n_regs0);
+		assert(n_regs0 == temp_n_regs0);
+		// exit(0);
 	}
 
-	// fprintf(stderr, "[M: %s] done major chaining\n", __func__);
+	// Compare the output
+	debug_compare_chain_output(a, temp_a, u, temp_u, n_regs0);
+	kfree(b->km, temp_a);
+	kfree(b->km, temp_u);
+
+	fprintf(stderr, "[M: %s] done major chaining\n", __func__);
 
 	if (opt->bw_long > opt->bw && (opt->flag & (MM_F_SPLICE|MM_F_SR|MM_F_NO_LJOIN)) == 0 && n_segs == 1 && n_regs0 > 1) { // re-chain/long-join for long sequences
 		int32_t st = (int32_t)a[0].y, en = (int32_t)a[(int32_t)u[0] - 1].y;
@@ -573,7 +595,8 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			return s;
 		} else free(s);
     } else if (step == 1) { // step 1: map
-		fprintf(stderr, "[M: %s] kt_for %d segs %d parts\n", __func__, ((step_t*)in)->n_frag, p->n_parts);
+		fprintf(stderr, "[M: %s] kt_for %d segs %d parts, %d threads\n", __func__, ((step_t*)in)->n_frag, p->n_parts, p->n_threads);
+		pltask_init(p->n_threads, ((step_t*)in)->n_frag);
 		if (p->n_parts > 0) merge_hits((step_t*)in);
 		// NOTE: allocate threads for worker, n_threads is input of mm_map_file_frag()
 		else kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
@@ -666,11 +689,11 @@ int mm_map_file_frag(const mm_idx_t *idx, int n_segs, const char **fn, const mm_
 	pl.fp = open_bseqs(pl.n_fp, fn);
 	if (pl.fp == 0) return -1;
 	pl.opt = opt, pl.mi = idx;
-	pl.n_threads = n_threads > 1? n_threads : 1;
+	pl.n_threads = n_threads > 1? n_threads : 1; // NOTE: pl.nthreads can be large 
 	pl.mini_batch_size = opt->mini_batch_size;
 	if (opt->split_prefix)
 		pl.fp_split = mm_split_init(opt->split_prefix, idx);
-	pl_threads = n_threads == 1? 1 : ((opt->flag&MM_F_2_IO_THREADS)? 3 : 2);
+	pl_threads = n_threads == 1? 1 : ((opt->flag&MM_F_2_IO_THREADS)? 3 : 2); // NOTE: pl_threads is either 3 or 2, IO and map
 	kt_pipeline(pl_threads, worker_pipeline, &pl, 3); /* make workload, pipeline */
 
 	free(pl.str.s);

@@ -354,7 +354,7 @@ int main(int argc, char *argv[])
 		fprintf(fp_help, "    --MD         output the MD tag\n");
 		fprintf(fp_help, "    --eqx        write =/X CIGAR operators\n");
 		fprintf(fp_help, "    -Y           use soft clipping for supplementary alignments\n");
-		fprintf(fp_help, "    -t INT       number of threads [%d]\n", n_threads);
+		fprintf(fp_help, "    -t INT       number of threads [%d]\n", n_threads); // NOTE: here define the number of threads
 		fprintf(fp_help, "    -K NUM       minibatch size for mapping [500M]\n");
 //		fprintf(fp_help, "    -v INT       verbose level [%d]\n", mm_verbose);
 		fprintf(fp_help, "    --version    show version number\n");
@@ -424,12 +424,14 @@ int main(int argc, char *argv[])
 		}
 		ret = 0;
 		if (!(opt.flag & MM_F_FRAG_MODE)) {
+			fprintf(stderr, "[M: %s] mm_map normal mode\n", __func__);
 			for (i = o.ind + 1; i < argc; ++i) {
                 ret = mm_map_file(mi, argv[i], &opt,
                                   n_threads);  // main workload: aligner
                 if (ret < 0) break;
 			}
 		} else {
+			fprintf(stderr, "[M: %s] mm_map frag mode\n", __func__);
             ret = mm_map_file_frag(mi, argc - (o.ind + 1),
                                    (const char **)&argv[o.ind + 1], &opt,
                                    n_threads);  // main workload: aligner
@@ -443,8 +445,10 @@ int main(int argc, char *argv[])
 	n_parts = idx_rdr->n_parts;
 	mm_idx_reader_close(idx_rdr);
 
-	if (opt.split_prefix)
+	if (opt.split_prefix) {
+		fprintf(stderr, "[M: %s] enable split and merge\n", __func__);
 		mm_split_merge(argc - (o.ind + 1), (const char**)&argv[o.ind + 1], &opt, n_parts);
+	}
 
 	if (fflush(stdout) == EOF) {
 		perror("[ERROR] failed to write the results");
