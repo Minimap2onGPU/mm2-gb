@@ -247,6 +247,7 @@ int mm_map_seed(const mm_idx_t *mi, int n_segs, const int *qlens, const char **s
                         mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long index)
 {
     // NOTE: prechain tasks and append to GPU task list
+	// TODO: wrap these variables into a big structure 
 	int i, j, rep_len, qlen_sum, n_regs0, n_mini_pos;
 	int max_chain_gap_qry, max_chain_gap_ref, is_splice = !!(opt->flag & MM_F_SPLICE), is_sr = !!(opt->flag & MM_F_SR);
 	uint32_t hash;
@@ -311,6 +312,9 @@ int mm_map_seed(const mm_idx_t *mi, int n_segs, const int *qlens, const char **s
 int mm_map_chain(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, \
                         mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname, long index)
 {
+	// retrieve data and do backtrack and alignment 
+	// TODO: when GPU alignment is ready, put compact {a} to GPU
+
 	return 0;
 }
 
@@ -591,6 +595,8 @@ typedef struct { // NOTE: this step_t is defined for plchain usage only
 
 static void seed_worker_for(void *_data, long i, int tid) {
 	// NOTE: this function call seeding and post chaining tasks to gpu
+	// TODO: build a task type array to store parameters needed and retrieve with i
+	// split variables in task type and input into mm_map_seed
     step_t *s = (step_t*)_data;
 	int qlens[MM_MAX_SEG], j, off = s->seg_off[i], pe_ori = s->p->opt->pe_ori;
 	const char *qseqs[MM_MAX_SEG];
