@@ -44,7 +44,7 @@ int32_t *get_f(int32_t *f, int64_t n, size_t index) {
 
 int pltask_init(int num_threads, int num_seqs) { 
 
-    fprintf(stderr, "[M: %s] Initialize pltask\n", __func__);
+    // fprintf(stderr, "[M: %s] Initialize pltask\n", __func__);
     size = num_threads;
     max_awaiting_tasks = num_threads;
     total_frags = num_seqs;
@@ -136,7 +136,7 @@ size_t pltask_append(int64_t n, mm128_t *a, int max_dist_x, int max_dist_y, int 
     }
 
     if (awaiting_tasks == max_awaiting_tasks || total_tasks == total_frags) { // TODO: when it is not a multiple of n_threads
-        fprintf(stderr, "[M: %s] Launch chaining kernel with %d seqs, %d / %d\n", __func__, awaiting_tasks, total_tasks, total_frags);
+        // fprintf(stderr, "[M: %s] Launch chaining kernel with %d seqs, %d / %d\n", __func__, awaiting_tasks, total_tasks, total_frags);
         Misc misc_info;
         misc_info.bw = bw;
         misc_info.max_skip = max_skip;
@@ -156,7 +156,7 @@ size_t pltask_append(int64_t n, mm128_t *a, int max_dist_x, int max_dist_y, int 
     }
     pthread_mutex_unlock(&pltask_lock);
 
-    fprintf(stderr, "[M: %s] ready to continue, %d / %d\n", __func__, task_id, total_frags);
+    // fprintf(stderr, "[M: %s] ready to continue, %d / %d\n", __func__, task_id, total_frags);
     return key;
 }
 
@@ -178,7 +178,7 @@ int pltask_launch(Misc *misc_info) {
     cudaMemset(device_mem_ptr->d_cut, 0xff, sizeof(size_t)*cut_num);
     cudaCheck();
 
-    fprintf(stderr, "[M: %s] Launch range selection\n", __func__);
+    // fprintf(stderr, "[M: %s] Launch range selection\n", __func__);
     range_selection_kernel_naive<<<DimGrid0, DimBlock0>>>(device_mem_ptr->d_ax, device_mem_ptr->d_start_idx, device_mem_ptr->d_read_end_idx, 
                                                                 device_mem_ptr->d_range, device_mem_ptr->d_cut, device_mem_ptr->d_cut_start_idx);
     cudaCheck();
@@ -189,7 +189,7 @@ int pltask_launch(Misc *misc_info) {
     int griddim = (cut_num-1)/NUM_SEG_PER_BLOCK + 1;
     dim3 DimBlock1(NUM_THREADS_SCORE, 1, 1);
     dim3 DimGrid1(griddim, 1, 1);
-    fprintf(stderr, "[M: %s] Launch score generation\n", __func__);
+    // fprintf(stderr, "[M: %s] Launch score generation\n", __func__);
     score_generation_naive<<<DimGrid1, DimBlock1>>>(device_mem_ptr->d_ax, device_mem_ptr->d_ay, device_mem_ptr->d_range, 
                                             device_mem_ptr->d_cut, device_mem_ptr->d_f, device_mem_ptr->d_p, total_n, cut_num);
     cudaCheck();

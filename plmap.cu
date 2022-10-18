@@ -311,7 +311,7 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	kfree(b->km, temp_a);
 	kfree(b->km, temp_u);
 
-	fprintf(stderr, "[M: %s] done major chaining\n", __func__);
+	// fprintf(stderr, "[M: %s] done major chaining\n", __func__);
 
 	if (opt->bw_long > opt->bw && (opt->flag & (MM_F_SPLICE|MM_F_SR|MM_F_NO_LJOIN)) == 0 && n_segs == 1 && n_regs0 > 1) { // re-chain/long-join for long sequences
 		int32_t st = (int32_t)a[0].y, en = (int32_t)a[(int32_t)u[0] - 1].y;
@@ -595,7 +595,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			return s;
 		} else free(s);
     } else if (step == 1) { // step 1: map
-		fprintf(stderr, "[M: %s] kt_for %d segs %d parts, %d threads\n", __func__, ((step_t*)in)->n_frag, p->n_parts, p->n_threads);
+		// fprintf(stderr, "[M: %s] kt_for %d segs %d parts, %d threads\n", __func__, ((step_t*)in)->n_frag, p->n_parts, p->n_threads);
 		pltask_init(p->n_threads, ((step_t*)in)->n_frag);
 		if (p->n_parts > 0) merge_hits((step_t*)in);
 		// NOTE: allocate threads for worker, n_threads is input of mm_map_file_frag()
@@ -706,7 +706,7 @@ int mm_map_file_frag(const mm_idx_t *idx, int n_segs, const char **fn, const mm_
 
 int mm_map_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, int n_threads)
 {
-	fprintf(stderr, "[M: %s], map file %s\n", __func__, fn);
+	// fprintf(stderr, "[M: %s], map file %s\n", __func__, fn);
 	return mm_map_file_frag(idx, 1, &fn, opt, n_threads);
 }
 

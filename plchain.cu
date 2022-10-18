@@ -183,7 +183,7 @@ mm128_t *mg_lchain_dp(
 	debug_chain_input(a, n, max_iter, max_dist_x, max_dist_y, max_skip,\
                         bw, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
 	#endif // DEBUG_INPUT
-	fprintf(stderr, "[M: %s] enter backward chaining\n", __func__);
+	// fprintf(stderr, "[M: %s] enter backward chaining\n", __func__);
 
 	// fill the score and backtrack arrays
 	for (i = 0, max_ii = -1; i < n; ++i) { 
@@ -233,7 +233,7 @@ mm128_t *mg_lchain_dp(
 			max_ii = i;
 		if (mmax_f < max_f) mmax_f = max_f;
 	}
-	fprintf(stderr, "[M: %s] enter backtracking\n", __func__);
+	// fprintf(stderr, "[M: %s] enter backtracking\n", __func__);
 
 	// NOTE: t is not use, v is updated, f & p are inputs, n_u & n_v are outputs.
 	u = mg_chain_backtrack(km, n, f, p, v, t, min_cnt, min_sc, max_drop, &n_u, &n_v);
@@ -248,7 +248,7 @@ mm128_t *mg_lchain_dp(
 		kfree(km, a); kfree(km, v);
 		return 0;
 	}
-	fprintf(stderr, "[M: %s] done backward chaining\n", __func__);
+	// fprintf(stderr, "[M: %s] done backward chaining\n", __func__);
 	return compact_a(km, n_u, u, n_v, v, a);
 }
 
@@ -475,7 +475,7 @@ mm128_t *forward_chain_cpu(int max_dist_x, int max_dist_y, int bw, int max_skip,
 		return 0;
 	}
 
-	fprintf(stderr, "[M: %s] enter forward chaining\n", __func__);
+	// fprintf(stderr, "[M: %s] enter forward chaining\n", __func__);
 
 	KMALLOC(km, p, n);
 	KMALLOC(km, f, n);
@@ -517,7 +517,7 @@ mm128_t *forward_chain_cpu(int max_dist_x, int max_dist_y, int bw, int max_skip,
 
 	mm128_t *b = compact_a(km, n_u, u, n_v, v, a);
 	// debug_compact_anchors(b, n_v);
-	fprintf(stderr, "[M: %s] done forward chaining\n", __func__);
+	// fprintf(stderr, "[M: %s] done forward chaining\n", __func__);
 
 	return b;
 }
