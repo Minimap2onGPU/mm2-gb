@@ -137,13 +137,15 @@ static inline int32_t comput_sc(const mm128_t *ai, const mm128_t *aj, int32_t ma
 	return sc;
 }
 
+extern FILE *f_chain_bin, *f_chain, *f_score;
+extern int print_q;
 /* Input:
  *   a[].x: tid<<33 | rev<<32 | tpos
  *   a[].y: flags<<40 | q_span<<32 | q_pos
  * Output:
  *   n_u: #chains
- *   u[]: score<<32 | #anchors (sum of lower 32 bits of u[] is the returned length of a[])
- * input a[] is deallocated on return
+ *   u[]: score<<32 | #anchors (sum of lower 32 bits of u[] is the returned
+ * length of a[]) input a[] is deallocated on return
  */
 mm128_t *mg_lchain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter, int min_cnt, int min_sc, float chn_pen_gap, float chn_pen_skip,
 					  int is_cdna, int n_seg, int64_t n, mm128_t *a, int *n_u_, uint64_t **_u, void *km)
@@ -151,9 +153,23 @@ mm128_t *mg_lchain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int 
 	int32_t *f, *t, *v, n_u, n_v, mmax_f = 0, max_drop = bw;
 	int64_t *p, i, j, max_ii, st = 0, n_iter = 0;
 	uint64_t *u;
+#ifdef OUTPUT_CHAIN
+if (print_q){
+    fprintf(f_chain, "#%lu\n", n);
+    for (int i = 0; i < n; i++){
+        fprintf(f_chain, "%lx,%lx\t", a[i].x, a[i].y);
+    }
+    fprintf(f_chain, "\n");
+}
+#endif // OUTPUT_CHAIN
 
-	if (_u) *_u = 0, *n_u_ = 0;
-	if (n == 0 || a == 0) {
+#ifdef OUTPUT_CHAIN_BIN
+    fwrite(&n, sizeof(int64_t), 1, f_chain_bin);
+    fwrite(a, sizeof(mm128_t), n, f_chain_bin);
+#endif // OUTPUT_CHAIN_BIN
+
+    if (_u) *_u = 0, *n_u_ = 0;
+    if (n == 0 || a == 0) {
 		kfree(km, a);
 		return 0;
 	}
@@ -205,8 +221,15 @@ mm128_t *mg_lchain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int 
 			max_ii = i;
 		if (mmax_f < max_f) mmax_f = max_f;
 	}
+#ifdef OUTPUT_CHAIN
+    fprintf(f_score, "#%lu\n", n);
+    for (int i = 0; i < n; i++){
+        fprintf(f_score, "%d,%ld\t", f[i], p[i]);
+    }
+    fprintf(f_score, "\n");
+#endif // OUTPUT_CHAIN
 
-	u = mg_chain_backtrack(km, n, f, p, v, t, min_cnt, min_sc, max_drop, &n_u, &n_v);
+    u = mg_chain_backtrack(km, n, f, p, v, t, min_cnt, min_sc, max_drop, &n_u, &n_v);
 	*n_u_ = n_u, *_u = u; // NB: note that u[] may not be sorted by score here
 	kfree(km, p); kfree(km, f); kfree(km, t);
 	if (n_u == 0) {
