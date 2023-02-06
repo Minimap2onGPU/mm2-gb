@@ -229,6 +229,14 @@ static mm_reg1_t *align_regs(const mm_mapopt_t *opt, const mm_idx_t *mi, void *k
 	return regs;
 }
 
+FILE *f_meta = NULL, *f_chain = NULL, *f_chain_bin = NULL, *f_score = NULL, *f_opt = NULL;
+char f_opt_filename[] = "output/chainopt.json";
+char f_meta_filename[] = "output/chain.meta";
+char f_chain_filename[] = "output/chain.anchor";
+char f_chain_filename_bin[] = "output/chain.anchor.bin";
+char f_score_filename[] = "output/chain.score";
+int print_q = 1;
+
 void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **seqs, int *n_regs, mm_reg1_t **regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname)
 {
 	int i, j, rep_len, qlen_sum, n_regs0, n_mini_pos;
@@ -277,7 +285,86 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 
 	chn_pen_gap  = opt->chain_gap_scale * 0.01 * mi->k;
 	chn_pen_skip = opt->chain_skip_scale * 0.01 * mi->k;
-	if (opt->flag & MM_F_RMQ) {
+#if defined(OUTPUT_CHAIN) || defined(OUTPUT_CHAIN_BIN)
+	// DEBUG: Output Meta Data for target and reference chain. 
+	if (!f_meta){
+        f_meta = fopen(f_meta_filename, "w+");
+        fprintf(f_meta, "@@@>tname\ttlen\tis_alt\n");
+        fprintf(f_meta, "#%u\n", mi->n_seq);
+        for (int i = 0; i < mi->n_seq; i++) {
+            fprintf(f_meta, ">%s %d %d\n", mi->seq[i].name, mi->seq[i].len, mi->seq[i].is_alt);
+        }
+        fprintf(f_meta,
+                "@@@Misc: max_dist_x\tmax_dist_y\tchn_pen_gap\tchn_pen_skip\tis_cdna\tn_seg\n");
+        fprintf(f_meta,
+                "%d\t%d\t%.6f\t%.6f\t%d\t%d\n",
+                max_chain_gap_ref, max_chain_gap_qry, chn_pen_gap, chn_pen_skip, is_splice,
+                n_segs);
+    }
+	if (!f_opt){
+        f_opt = fopen(f_opt_filename, "w+");
+        fprintf(f_opt,
+                "{\n"
+				"\t\"k\":%d,\n"
+                "\t\"bw\":%d,\"bw_long\":%d,\n"
+                "\t\"max_gap\":%d,\"max_gap_ref\":%d,\n"
+                "\t\"max_frag_len\":%d,\n"
+                "\t\"max_chain_skip\":%d,\"max_chain_iter\":%d,\n"
+                "\t\"min_cnt\":%d,\n"
+                "\t\"min_chain_score\":%d,\n"
+                "\t\"chain_gap_scale\":%f,\n"
+                "\t\"chain_skip_scale\":%f,\n"
+                "\t\"alt_drop\":%f,\n"
+                "\t\"mask_level\":%f,\n"
+                "\t\"mask_len\":%d,\n"
+                "\t\"match_sc\":%d,\"mismatch_sc\":%d,\n"
+                "\t\"pri_ratio\":%f,\n"
+                "\t\"best_n\":%d\n"
+                "}\n",
+				mi->k,
+                opt->bw, opt->bw_long,
+				opt->max_gap, opt->max_gap_ref, 
+				opt->max_frag_len,
+				opt->max_chain_skip, opt->max_chain_iter, 
+				opt->min_cnt,
+                opt->min_chain_score,
+				opt->chain_gap_scale, opt->chain_skip_scale,
+                opt->alt_drop,
+                opt->mask_level, opt->mask_len, opt->a, opt->b,
+                opt->pri_ratio, opt->best_n);
+    }
+#endif  // defined(OUTPUT_CHAIN) || defined(OUTPUT_CHIAN_BIN)
+#ifdef OUTPUT_CHAIN
+    if (!f_chain){
+        f_chain = fopen(f_chain_filename, "w+");
+        fprintf(f_chain, "@@@<qname\tqlen\n");
+    }
+
+    if (!f_score) {
+        f_score = fopen(f_score_filename, "w+");
+        fprintf(f_score, "@@@<qname\tqlen\n");
+    }
+
+	if (print_q){
+		fprintf(f_chain, "<%s %d\n", qname, qlen_sum);
+		fprintf(f_chain, "*%d\n", rep_len);
+		fprintf(f_score, "<%s %d\n", qname, qlen_sum);
+	}
+#endif // OUTPUT_CHAIN
+
+#ifdef OUTPUT_CHAIN_BIN
+	if (!f_chain_bin) {
+        f_chain_bin = fopen(f_chain_filename_bin, "wb");
+        if (!f_chain_bin) fprintf(stderr, "f_chain open failed\n");
+        fwrite("@@@", sizeof(char), 3, f_chain_bin);
+    }
+    fprintf(f_chain, "<%s ", qname);
+    fprintf(stderr, "<%s ", qname);
+    fwrite(&qlen_sum, sizeof(uint32_t), 1, f_chain_bin);
+    fwrite(&rep_len, sizeof(int), 1, f_chain_bin);
+#endif // OUTPUT_CHAIN_BIN
+
+    if (opt->flag & MM_F_RMQ) {
 		a = mg_lchain_rmq(opt->max_gap, opt->rmq_inner_dist, opt->bw, opt->max_chain_skip, opt->rmq_size_cap, opt->min_cnt, opt->min_chain_score,
 						  chn_pen_gap, chn_pen_skip, n_a, a, &n_regs0, &u, b->km);
 	} else {

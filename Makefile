@@ -1,5 +1,8 @@
 CFLAGS=		-g -Wall -O2 -Wc++-compat #-Wextra
 CPPFLAGS=	-DHAVE_KALLOC
+#Add flags for output chaining inputs
+# CPPFLAGS +=  -DOUTPUT_CHAIN_BIN
+CPPFLAGS += -DOUTPUT_CHAIN
 INCLUDES=
 OBJS=		kthread.o kalloc.o misc.o bseq.o sketch.o sdust.o options.o index.o \
 			lchain.o align.o hit.o seed.o map.o format.o pe.o esterr.o splitidx.o \
