@@ -212,7 +212,18 @@ static void chain_post(const mm_mapopt_t *opt, int max_chain_gap_ref, const mm_i
 {
 	if (!(opt->flag & MM_F_ALL_CHAINS)) { // don't choose primary mapping(s)
 		mm_set_parent(km, opt->mask_level, opt->mask_len, *n_regs, regs, opt->a * 2 + opt->b, opt->flag&MM_F_HARD_MLEVEL, opt->alt_drop);
-		if (n_segs <= 1) mm_select_sub(km, opt->pri_ratio, mi->k*2, opt->best_n, 1, opt->max_gap * 0.8, n_regs, regs);
+        fprintf(stderr, "<%s n_alt %d n_segs %d\n", "00000", mi->n_alt, n_segs);
+        // for (int i = 0; i < *n_regs; i++) {
+        //     fprintf(
+        //         stderr,
+        //         "[%d] cnt %d rid %d score %d qs %d qe %d rs %d re %d parent %d "
+        //         "subsc %d as %d mlen %d blen %d n_sub %d score0 %d\n",
+        //         regs[i].id, regs[i].cnt, regs[i].rid, regs[i].score,
+        //         regs[i].qs, regs[i].qe, regs[i].rs, regs[i].re,
+        //         regs[i].parent, regs[i].subsc, regs[i].as, regs[i].mlen,
+        //         regs[i].blen, regs[i].n_sub, regs[i].score0);
+        // }
+        if (n_segs <= 1) mm_select_sub(km, opt->pri_ratio, mi->k*2, opt->best_n, 1, opt->max_gap * 0.8, n_regs, regs);
 		else mm_select_sub_multi(km, opt->pri_ratio, 0.2f, 0.7f, max_chain_gap_ref, mi->k*2, opt->best_n, n_segs, qlens, n_regs, regs);
 	}
 }
@@ -305,7 +316,7 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
         f_opt = fopen(f_opt_filename, "w+");
         fprintf(f_opt,
                 "{\n"
-				"\t\"k\":%d,\n"
+                "\t\"k\":%d,\n"
                 "\t\"bw\":%d,\"bw_long\":%d,\n"
                 "\t\"max_gap\":%d,\"max_gap_ref\":%d,\n"
                 "\t\"max_frag_len\":%d,\n"
@@ -319,19 +330,21 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
                 "\t\"mask_len\":%d,\n"
                 "\t\"match_sc\":%d,\"mismatch_sc\":%d,\n"
                 "\t\"pri_ratio\":%f,\n"
-                "\t\"best_n\":%d\n"
+                "\t\"best_n\":%d,\n"
+                "\t\"rmq_size_cap\":%d,\n"
+                "\t\"rmq_inner_dist\":%d,\n"
+                "\t\"rmq_rescue_size\":%d,\n"
+                "\t\"rmq_rescue_ratio\":%f,\n"
+                "\t\"flag\":\"0x%lx\",\n"
+                "\t\"seed\":%d\n"
                 "}\n",
-				mi->k,
-                opt->bw, opt->bw_long,
-				opt->max_gap, opt->max_gap_ref, 
-				opt->max_frag_len,
-				opt->max_chain_skip, opt->max_chain_iter, 
-				opt->min_cnt,
-                opt->min_chain_score,
-				opt->chain_gap_scale, opt->chain_skip_scale,
-                opt->alt_drop,
-                opt->mask_level, opt->mask_len, opt->a, opt->b,
-                opt->pri_ratio, opt->best_n);
+                mi->k, opt->bw, opt->bw_long, opt->max_gap, opt->max_gap_ref,
+                opt->max_frag_len, opt->max_chain_skip, opt->max_chain_iter,
+                opt->min_cnt, opt->min_chain_score, opt->chain_gap_scale,
+                opt->chain_skip_scale, opt->alt_drop, opt->mask_level,
+                opt->mask_len, opt->a, opt->b, opt->pri_ratio, opt->best_n,
+                opt->rmq_size_cap, opt->rmq_inner_dist, opt->rmq_rescue_size,
+                opt->rmq_rescue_ratio, opt->flag, opt->seed);
     }
 #endif  // defined(OUTPUT_CHAIN) || defined(OUTPUT_CHIAN_BIN)
 #ifdef OUTPUT_CHAIN
@@ -409,13 +422,32 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	b->frag_gap = max_chain_gap_ref;
 	b->rep_len = rep_len;
 
-	regs0 = mm_gen_regs(b->km, hash, qlen_sum, n_regs0, u, a, !!(opt->flag&MM_F_QSTRAND));
+    // fprintf(stderr, "<%s\n", qname);
+    // for (int i = 0, j = 0; i < n_regs0; i++) {
+    //     fprintf(stderr, "[%ld] #%d: ", u[i] >> 32, (uint32_t)u[i]);
+    //     for (int new_j = j + (uint32_t)u[i]; j < new_j; j++) {
+    //         fprintf(stderr, "%lx,%lx ", a[j].x, a[j].y);
+    //     }
+    //     fprintf(stderr, "\n");
+    // }
+
+    regs0 = mm_gen_regs(b->km, hash, qlen_sum, n_regs0, u, a, !!(opt->flag&MM_F_QSTRAND));
 	if (mi->n_alt) {
 		mm_mark_alt(mi, n_regs0, regs0);
 		mm_hit_sort(b->km, &n_regs0, regs0, opt->alt_drop); // this step can be merged into mm_gen_regs(); will do if this shows up in profile
 	}
 
-	if (mm_dbg_flag & (MM_DBG_PRINT_SEED|MM_DBG_PRINT_CHAIN))
+    // fprintf(stderr, "<%s n_alt %d n_segs %d\n", qname, mi->n_alt, n_segs);
+    // for (int i = 0; i < n_regs0; i++) {
+    //     fprintf(stderr,
+    //             "[%d] cnt %d rid %d score %d qs %d qe %d rs %d re %d parent %d "
+    //             "subsc %d as %d mlen %d blen %d n_sub %d score0 %d\n",
+    //             regs0[i].id, regs0[i].cnt, regs0[i].rid, regs0[i].score,
+    //             regs0[i].qs, regs0[i].qe, regs0[i].rs, regs0[i].re,
+    //             regs0[i].parent, regs0[i].subsc, regs0[i].as, regs0[i].mlen,
+    //             regs0[i].blen, regs0[i].n_sub, regs0[i].score0);
+    // }
+    if (mm_dbg_flag & (MM_DBG_PRINT_SEED|MM_DBG_PRINT_CHAIN))
 		for (j = 0; j < n_regs0; ++j)
 			for (i = regs0[j].as; i < regs0[j].as + regs0[j].cnt; ++i)
 				fprintf(stderr, "CN\t%d\t%s\t%d\t%c\t%d\t%d\t%d\n", j, mi->seq[a[i].x<<1>>33].name, (int32_t)a[i].x, "+-"[a[i].x>>63], (int32_t)a[i].y, (int32_t)(a[i].y>>32&0xff),
@@ -465,7 +497,7 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	}
 }
 
-mm_reg1_t *mm_map(const mm_idx_t *mi, int qlen, const char *seq, int *n_regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname)
+mm_reg1_t *mm_map(const mm_idx_t *mi, int qlen, const char *seq, int *n_regs, mm_tbuf_sudot *b, const mm_mapopt_t *opt, const char *qname)
 {
 	mm_reg1_t *regs;
 	mm_map_frag(mi, 1, &qlen, &seq, n_regs, &regs, b, opt, qname);
