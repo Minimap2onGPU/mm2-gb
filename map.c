@@ -497,7 +497,7 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 	}
 }
 
-mm_reg1_t *mm_map(const mm_idx_t *mi, int qlen, const char *seq, int *n_regs, mm_tbuf_sudot *b, const mm_mapopt_t *opt, const char *qname)
+mm_reg1_t *mm_map(const mm_idx_t *mi, int qlen, const char *seq, int *n_regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *qname)
 {
 	mm_reg1_t *regs;
 	mm_map_frag(mi, 1, &qlen, &seq, n_regs, &regs, b, opt, qname);
