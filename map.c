@@ -371,7 +371,7 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
         if (!f_chain_bin) fprintf(stderr, "f_chain open failed\n");
         fwrite("@@@", sizeof(char), 3, f_chain_bin);
     }
-    fprintf(f_chain, "<%s ", qname);
+    fprintf(f_chain_bin, "<%s ", qname);
     fprintf(stderr, "<%s ", qname);
     fwrite(&qlen_sum, sizeof(uint32_t), 1, f_chain_bin);
     fwrite(&rep_len, sizeof(int), 1, f_chain_bin);

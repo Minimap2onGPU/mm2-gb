@@ -1,6 +1,6 @@
 CFLAGS=		-g -Wall -O2 -Wc++-compat #-Wextra
 CPPFLAGS=	-DHAVE_KALLOC
-#Add flags for output chaining inputs
+# TODO: Add flags for output chaining inputs
 CPPFLAGS +=  -DOUTPUT_CHAIN_BIN
 # CPPFLAGS += -DOUTPUT_CHAIN
 INCLUDES=
