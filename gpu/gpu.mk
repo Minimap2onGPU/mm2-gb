@@ -19,7 +19,7 @@ CUDATESTFLAG	= -G
 ############	HIP Compile		###################
 ###################################################
 HIPCC			= hipcc
-HIPFLAGS		= -DUSEHIP -DNDEBUG ## turn off assert
+HIPFLAGS		= -DUSEHIP -DNDEBUG -Rpass-analysis=kernel-resource-usage ## turn off assert
 HIPTESTFLAGS	= -g
 
 ###################################################

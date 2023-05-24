@@ -247,6 +247,78 @@ void plchain_cal_score_launch(chain_read_t **reads_, int *n_read_, Misc misc, st
     cudaCheck();
 }
 
+// DEBUG: find long seg range distribution
+void plchain_cal_long_seg_range_dis(size_t total_n, deviceMemPtr* dev_mem){
+    static uint64_t long_seg_range_dis[5001] = {0};
+    static unsigned int long_seg_total = 0;
+    static uint64_t long_seg_anchors_total = 0;
+    static FILE* fp = NULL;
+    // check range
+    int32_t* range = (int32_t*)malloc(sizeof(int32_t) * total_n);
+    cudaMemcpy(range, dev_mem->d_range, sizeof(int32_t) * total_n,
+                cudaMemcpyDeviceToHost);
+
+    unsigned int long_seg_count;
+    cudaMemcpy(&long_seg_count, dev_mem->d_long_seg_count, sizeof(unsigned int),
+                cudaMemcpyDeviceToHost);
+    fprintf(stderr, "[verbose] %u long segs generated\n", long_seg_count);
+    seg_t* long_seg = (seg_t*)malloc(sizeof(seg_t) * long_seg_count);
+    cudaMemcpy(long_seg, dev_mem->d_long_seg, sizeof(seg_t) * long_seg_count,
+                cudaMemcpyDeviceToHost);
+    for (int sid = 0; sid < long_seg_count; sid++) {
+        for (size_t i = long_seg[sid].start_idx; i < long_seg[sid].end_idx; i++){
+            assert(range[i] <= 5000);
+            long_seg_range_dis[range[i]]++;
+        }
+        long_seg_anchors_total += long_seg[sid].end_idx - long_seg[sid].start_idx;
+        ++long_seg_total;
+    }   
+    if (!fp) {
+        fp = fopen("long_seg_range_dis.csv", "w+");
+        fprintf(fp, "num_segs\tnum_anchors");
+        for (int i = 0; i < 5000; i++) fprintf(fp, "\t%lu", i);
+        fprintf(fp, "\n");
+    }
+    fprintf(fp, "%usegs\t%luanchors", long_seg_total, long_seg_anchors_total);
+    for (int i = 0; i < 5000; i++){
+        fprintf(fp, "\t%lu", long_seg_range_dis[i]);
+    }
+    fprintf(fp, "\n");
+    free(range);
+    free(long_seg);
+}
+
+// plchain_print_cuts(size_t total_n, deviceMemPtr* dev_mem, chain_read_t* reads, size_t cut_num){
+//     // check range
+//     int32_t* range = (int32_t*)malloc(sizeof(int32_t) * total_n);
+//     cudaMemcpy(range, dev_mem->d_range, sizeof(int32_t) * total_n,
+//                 cudaMemcpyDeviceToHost);
+
+//     size_t* cut = (size_t*)malloc(sizeof(size_t) * cut_num);
+//     cudaMemcpy(cut, dev_mem->d_cut, sizeof(size_t) * cut_num,
+//                 cudaMemcpyDeviceToHost);
+//     for (int readid = 0, cid = 0, idx = 0; readid < dev_mem->size;
+//             readid++) {
+// #ifdef DEBUG_VERBOSE
+//         debug_print_cut(cut + cid, cut_num - cid, reads[readid].n, idx);
+// #endif
+//         cid += debug_check_cut(cut + cid, range, cut_num - cid,
+//                                 reads[readid].n, idx);
+//         idx += reads[readid].n;
+//     }
+//     int64_t read_start = 0;
+//     for (int i = 0; i < dev_mem->size; i++) {
+// #ifdef DEBUG_VERBOSE
+//         debug_print_successor_range(range + read_start, reads[i].n);
+// #endif
+//         // debug_check_range(range + read_start, input_arr[i].range,
+//         // input_arr[i].n);
+//         read_start += reads[i].n;
+//     }
+//     free(range);
+//     free(cut);
+// }
+
 
 void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, streamSetup_t stream_setup, int thread_id, void* km){
     chain_read_t* reads = *reads_;
@@ -257,40 +329,13 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
     int stream_id = thread_id;
     if (stream_setup.streams[stream_id].busy) {
         cudaStreamSynchronize(stream_setup.streams[stream_id].cudastream);
-#ifdef DEBUG_CHECK
+
         size_t total_n = stream_setup.streams[stream_id].host_mem.total_n;
         chain_read_t* reads = stream_setup.streams[stream_id].reads;
         deviceMemPtr* dev_mem = &stream_setup.streams[stream_id].dev_mem;
         size_t cut_num = stream_setup.streams[stream_id].host_mem.cut_num;
-        // check range
-        int32_t* range = (int32_t*)malloc(sizeof(int32_t) * total_n);
-        cudaMemcpy(range, dev_mem->d_range, sizeof(int32_t) * total_n,
-                   cudaMemcpyDeviceToHost);
+        plchain_cal_long_seg_range_dis(total_n, dev_mem);
 
-        size_t* cut = (size_t*)malloc(sizeof(size_t) * cut_num);
-        cudaMemcpy(cut, dev_mem->d_cut, sizeof(size_t) * cut_num,
-                   cudaMemcpyDeviceToHost);
-        for (int readid = 0, cid = 0, idx = 0; readid < dev_mem->size;
-             readid++) {
-#ifdef DEBUG_VERBOSE
-            debug_print_cut(cut + cid, cut_num - cid, reads[readid].n, idx);
-#endif
-            cid += debug_check_cut(cut + cid, range, cut_num - cid,
-                                   reads[readid].n, idx);
-            idx += reads[readid].n;
-        }
-        int64_t read_start = 0;
-        for (int i = 0; i < dev_mem->size; i++) {
-#ifdef DEBUG_VERBOSE
-            debug_print_successor_range(range + read_start, reads[i].n);
-#endif
-            // debug_check_range(range + read_start, input_arr[i].range,
-            // input_arr[i].n);
-            read_start += reads[i].n;
-        }
-        free(range);
-        free(cut);
-#endif
         // cleanup previous batch in the stream
         plchain_backtracking(&stream_setup.streams[stream_id].host_mem,
                                 stream_setup.streams[stream_id].reads, misc, km);
@@ -496,6 +541,11 @@ void finish_stream_gpu(const mm_idx_t *mi, const mm_mapopt_t *opt, chain_read_t*
     int n_read;
     cudaStreamSynchronize(stream_setup.streams[t].cudastream);
     cudaCheck();
+
+    size_t total_n = stream_setup.streams[t].host_mem.total_n;
+    deviceMemPtr* dev_mem = &stream_setup.streams[t].dev_mem;
+    plchain_cal_long_seg_range_dis(total_n, dev_mem);
+        
     plchain_backtracking(&stream_setup.streams[t].host_mem,
                          stream_setup.streams[t].reads, misc, km);
     reads = stream_setup.streams[t].reads;

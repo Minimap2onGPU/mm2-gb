@@ -1,5 +1,5 @@
 {
-    "num_streams": 16,
+    "num_streams": 1,
     "min_n": 512, 
     "//min_n": "queries with less anchors will be handled on cpu",
     "//max_total_n": "[optional] max number of anchors per stream",
