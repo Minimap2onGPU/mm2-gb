@@ -275,60 +275,18 @@ void plchain_cal_long_seg_range_dis(size_t total_n, deviceMemPtr* dev_mem){
     }   
     if (!fp) {
         fp = fopen("long_seg_range_dis.csv", "w+");
-        fprintf(fp, "num_segs\tnum_anchors");
-        for (int i = 0; i < 5000; i++) fprintf(fp, "\t%lu", i);
+        fprintf(fp, "num_segs,num_anchors");
+        for (int i = 0; i < 5000; i++) fprintf(fp, ",%d", i);
         fprintf(fp, "\n");
     }
-    fprintf(fp, "%usegs\t%luanchors", long_seg_total, long_seg_anchors_total);
+    fprintf(fp, "%u segs,%lu anchors", long_seg_total, long_seg_anchors_total);
     for (int i = 0; i < 5000; i++){
-        fprintf(fp, "\t%lu", long_seg_range_dis[i]);
+        fprintf(fp, ",%lu", long_seg_range_dis[i]);
     }
     fprintf(fp, "\n");
     free(range);
     free(long_seg);
 }
-
-// DEBUG: find long seg range distribution
-void plchain_cal_long_seg_range_dis(size_t total_n, deviceMemPtr* dev_mem){
-    static uint64_t long_seg_range_dis[5001] = {0};
-    static unsigned int long_seg_total = 0;
-    static uint64_t long_seg_anchors_total = 0;
-    static FILE* fp = NULL;
-    // check range
-    int32_t* range = (int32_t*)malloc(sizeof(int32_t) * total_n);
-    cudaMemcpy(range, dev_mem->d_range, sizeof(int32_t) * total_n,
-                cudaMemcpyDeviceToHost);
-
-    unsigned int long_seg_count;
-    cudaMemcpy(&long_seg_count, dev_mem->d_long_seg_count, sizeof(unsigned int),
-                cudaMemcpyDeviceToHost);
-    fprintf(stderr, "[verbose] %u long segs generated\n", long_seg_count);
-    seg_t* long_seg = (seg_t*)malloc(sizeof(seg_t) * long_seg_count);
-    cudaMemcpy(long_seg, dev_mem->d_long_seg, sizeof(seg_t) * long_seg_count,
-                cudaMemcpyDeviceToHost);
-    for (int sid = 0; sid < long_seg_count; sid++) {
-        for (size_t i = long_seg[sid].start_idx; i < long_seg[sid].end_idx; i++){
-            assert(range[i] <= 5000);
-            long_seg_range_dis[range[i]]++;
-        }
-        long_seg_anchors_total += long_seg[sid].end_idx - long_seg[sid].start_idx;
-        ++long_seg_total;
-    }   
-    if (!fp) {
-        fp = fopen("long_seg_range_dis.csv", "w+");
-        fprintf(fp, "num_segs\tnum_anchors");
-        for (int i = 0; i < 5000; i++) fprintf(fp, "\t%lu", i);
-        fprintf(fp, "\n");
-    }
-    fprintf(fp, "%usegs\t%luanchors", long_seg_total, long_seg_anchors_total);
-    for (int i = 0; i < 5000; i++){
-        fprintf(fp, "\t%lu", long_seg_range_dis[i]);
-    }
-    fprintf(fp, "\n");
-    free(range);
-    free(long_seg);
-}
-
 
 // DEBUG: range distribution
 void plchain_cal_range_dis(size_t total_n, size_t num_cut, deviceMemPtr* dev_mem){
@@ -350,13 +308,13 @@ void plchain_cal_range_dis(size_t total_n, size_t num_cut, deviceMemPtr* dev_mem
     seg_total += num_cut;
     if (!fp) {
         fp = fopen("range_dis.csv", "w+");
-        fprintf(fp, "num_segs\tnum_anchors");
-        for (int i = 0; i < 5000; i++) fprintf(fp, "\t%lu", i);
+        fprintf(fp, "num_segs,num_anchors");
+        for (int i = 0; i < 5000; i++) fprintf(fp, ",%d", i);
         fprintf(fp, "\n");
     }
-    fprintf(fp, "%usegs\t%luanchors", long_seg_total, long_seg_anchors_total);
+    fprintf(fp, "%usegs,%luanchors", seg_total, anchors_total);
     for (int i = 0; i < 5000; i++){
-        fprintf(fp, "\t%lu", long_seg_range_dis[i]);
+        fprintf(fp, ",%lu", range_dis[i]);
     }
     fprintf(fp, "\n");
     free(range);
@@ -409,6 +367,7 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
         deviceMemPtr* dev_mem = &stream_setup.streams[stream_id].dev_mem;
         size_t cut_num = stream_setup.streams[stream_id].host_mem.cut_num;
         plchain_cal_long_seg_range_dis(total_n, dev_mem);
+        plchain_cal_range_dis(total_n, cut_num, dev_mem);
 
         // cleanup previous batch in the stream
         plchain_backtracking(&stream_setup.streams[stream_id].host_mem,
@@ -617,8 +576,10 @@ void finish_stream_gpu(const mm_idx_t *mi, const mm_mapopt_t *opt, chain_read_t*
     cudaCheck();
 
     size_t total_n = stream_setup.streams[t].host_mem.total_n;
+    size_t cut_num = stream_setup.streams[t].host_mem.cut_num;
     deviceMemPtr* dev_mem = &stream_setup.streams[t].dev_mem;
     plchain_cal_long_seg_range_dis(total_n, dev_mem);
+    plchain_cal_range_dis(total_n, cut_num, dev_mem);
         
     plchain_backtracking(&stream_setup.streams[t].host_mem,
                          stream_setup.streams[t].reads, misc, km);
