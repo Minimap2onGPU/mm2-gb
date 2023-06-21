@@ -37,6 +37,9 @@ typedef struct {
 typedef struct seg_t {
     size_t start_idx;
     size_t end_idx;
+    // DEBUG:
+    size_t start_segid;
+    size_t end_segid;
 } seg_t;
 
 typedef struct {

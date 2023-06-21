@@ -140,6 +140,8 @@ __global__ void score_generation_short(
                 int long_seg_idx = atomicAdd(long_seg_count, 1);
                 long_seg[long_seg_idx].start_idx = start_idx;
                 long_seg[long_seg_idx].end_idx = end_idx;
+                long_seg[long_seg_idx].start_segid = segid;
+                long_seg[long_seg_idx].end_segid = end_segid;
             }
             continue;
         }

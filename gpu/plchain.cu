@@ -265,11 +265,33 @@ void plchain_cal_long_seg_range_dis(size_t total_n, deviceMemPtr* dev_mem){
     seg_t* long_seg = (seg_t*)malloc(sizeof(seg_t) * long_seg_count);
     cudaMemcpy(long_seg, dev_mem->d_long_seg, sizeof(seg_t) * long_seg_count,
                 cudaMemcpyDeviceToHost);
+
+    static FILE* fp_all_data = NULL;
+    if (!fp_all_data){
+        fp_all_data = fopen("long_seg_range_dis_all.csv", "w+");
+        fprintf(fp_all_data, "seg_length");
+        for (int i = 0; i < 5000; i++) fprintf(fp_all_data, ",%d", i);
+        fprintf(fp_all_data, "\n");
+    }
+
     for (int sid = 0; sid < long_seg_count; sid++) {
+        uint64_t long_seg_range_dis_all[5001] = {0};
         for (size_t i = long_seg[sid].start_idx; i < long_seg[sid].end_idx; i++){
             assert(range[i] <= 5000);
             long_seg_range_dis[range[i]]++;
+            long_seg_range_dis_all[range[i]]++;
         }
+        if (long_seg[sid].end_idx - long_seg[sid].start_idx < 530){
+            fprintf(stderr, "Found seg of length %lu, segid %lu - %lu \n",
+                    long_seg[sid].end_idx - long_seg[sid].start_idx,
+                    long_seg[sid].start_segid, long_seg[sid].end_segid);
+        }
+
+        fprintf(fp_all_data, "%lu", long_seg[sid].end_idx - long_seg[sid].start_idx);
+        for (int i = 0; i < 5000; i++){
+            fprintf(fp_all_data, ",%lu", long_seg_range_dis_all[i]);
+        }
+        fprintf(fp_all_data, "\n");
         long_seg_anchors_total += long_seg[sid].end_idx - long_seg[sid].start_idx;
         ++long_seg_total;
     }   
@@ -299,7 +321,7 @@ void plchain_cal_range_dis(size_t total_n, size_t num_cut, deviceMemPtr* dev_mem
     cudaMemcpy(range, dev_mem->d_range, sizeof(int32_t) * total_n,
                 cudaMemcpyDeviceToHost);
 
-    fprintf(stderr, "[verbose] %lu long cuts generated\n", num_cut);
+    fprintf(stderr, "[verbose] %lu cuts generated\n", num_cut);
     for (size_t i = 0; i < total_n; i++){
         assert(range[i] <= 5000);
         range_dis[range[i]]++;
@@ -312,7 +334,7 @@ void plchain_cal_range_dis(size_t total_n, size_t num_cut, deviceMemPtr* dev_mem
         for (int i = 0; i < 5000; i++) fprintf(fp, ",%d", i);
         fprintf(fp, "\n");
     }
-    fprintf(fp, "%usegs,%luanchors", seg_total, anchors_total);
+    fprintf(fp, "%lusegs,%luanchors", seg_total, anchors_total);
     for (int i = 0; i < 5000; i++){
         fprintf(fp, ",%lu", range_dis[i]);
     }
