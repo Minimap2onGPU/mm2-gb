@@ -384,10 +384,20 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
     if (stream_setup.streams[stream_id].busy) {
         cudaStreamSynchronize(stream_setup.streams[stream_id].cudastream);
 
+
         size_t total_n = stream_setup.streams[stream_id].host_mem.total_n;
         chain_read_t* reads = stream_setup.streams[stream_id].reads;
         deviceMemPtr* dev_mem = &stream_setup.streams[stream_id].dev_mem;
         size_t cut_num = stream_setup.streams[stream_id].host_mem.cut_num;
+        // DEBUG: print seg numbers for each kernel
+
+        unsigned int num_mid_seg, num_long_seg;
+        cudaMemcpy(&num_mid_seg, dev_mem->d_mid_seg_count, sizeof(unsigned int),
+                   cudaMemcpyDeviceToHost);
+        cudaMemcpy(&num_long_seg, dev_mem->d_long_seg_count, sizeof(unsigned int),
+                   cudaMemcpyDeviceToHost);
+        fprintf(stderr, "[DEBUG] total segs: %lu, short:%lu mid: %u long: %u\n", cut_num, cut_num - num_mid_seg - num_long_seg, num_mid_seg, num_long_seg);
+
         plchain_cal_long_seg_range_dis(total_n, dev_mem);
         plchain_cal_range_dis(total_n, cut_num, dev_mem);
 
