@@ -15,10 +15,10 @@
     },
     "score_kernel": {
         "short_blockdim": 64,
-        "long_blockdim": 64,
-        "mid_blockdim": 64,
+        "long_blockdim": 1024,
+        "mid_blockdim": 512,
         "short_griddim": 2016,
         "long_griddim": 2016,
-        "mid_griddim": 8064
+        "mid_griddim": 2016
     }
 }

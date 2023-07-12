@@ -206,7 +206,14 @@ void plmem_async_d2h_memcpy(stream_ptr_t *stream_ptrs) {
     cudaMemcpyAsync(host_mem->p, dev_mem->d_p,
                     sizeof(uint16_t) * host_mem->total_n,
                     cudaMemcpyDeviceToHost, *stream);
-    cudaCheck();
+#ifdef CPU_LONG_SEG // copy long segements to cpu
+    cudaMemcpyAsync(&host_mem->long_seg_count, dev_mem->d_long_seg_count,
+                    sizeof(unsigned int),
+                    cudaMemcpyDeviceToHost, *stream);
+    cudaMemcpyAsync(host_mem->long_seg, dev_mem->d_long_seg,
+                    sizeof(seg_t) * (host_mem->cut_num / (MM_LONG_SEG_CUTOFF + 1)),
+                    cudaMemcpyDeviceToHost, *stream);
+#endif  // CPU_LONG_SEG
 }
 
 void plmem_sync_d2h_memcpy(hostMemPtr *host_mem, deviceMemPtr *dev_mem){
@@ -214,6 +221,14 @@ void plmem_sync_d2h_memcpy(hostMemPtr *host_mem, deviceMemPtr *dev_mem){
                cudaMemcpyDeviceToHost);
     cudaMemcpy(host_mem->p, dev_mem->d_p, sizeof(uint16_t) * host_mem->total_n,
                cudaMemcpyDeviceToHost);
+
+#ifdef CPU_LONG_SEG // copy long segements to cpu
+    cudaMemcpy(&host_mem->long_seg_count, dev_mem->d_long_seg_count,
+               sizeof(unsigned int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(host_mem->long_seg, dev_mem->d_long_seg,
+               sizeof(seg_t) * host_mem->long_seg_count,
+               cudaMemcpyDeviceToHost);
+#endif  // CPU_LONG_SEG
     cudaCheck();
 }
 

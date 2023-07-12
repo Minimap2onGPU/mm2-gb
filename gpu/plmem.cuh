@@ -6,6 +6,11 @@
 
 #define MEM_GPU (16-4) // 16 - 4 GB as memory pool = 16760832(0xffc000) KB
 
+typedef struct seg_t {
+    size_t start_idx;
+    size_t end_idx;
+} seg_t;
+
 typedef struct {
     int index;       // read index / batch index
     int griddim;     // grid for range selection kernel. 
@@ -34,12 +39,13 @@ typedef struct {
     size_t *start_idx;
     size_t *read_end_idx;
     size_t *cut_start_idx;
-} hostMemPtr;
 
-typedef struct seg_t {
-    size_t start_idx;
-    size_t end_idx;
-} seg_t;
+#ifdef CPU_LONG_SEG
+    // long segments
+    seg_t* long_seg;
+    unsigned int long_seg_count;
+#endif
+} hostMemPtr;
 
 typedef struct {
     int size;

@@ -116,6 +116,116 @@ void plchain_backtracking(hostMemPtr *host_mem, chain_read_t *reads, Misc misc, 
     }
 }
 
+#ifdef CPU_LONG_SEG
+static inline int32_t comput_sc(const mm128_t *ai, const mm128_t *aj, int32_t max_dist_x, int32_t max_dist_y, int32_t bw, float chn_pen_gap, float chn_pen_skip, int is_cdna, int n_seg)
+{
+	int32_t dq = (int32_t)ai->y - (int32_t)aj->y, dr, dd, dg, q_span, sc;
+	int32_t sidi = (ai->y & MM_SEED_SEG_MASK) >> MM_SEED_SEG_SHIFT;
+	int32_t sidj = (aj->y & MM_SEED_SEG_MASK) >> MM_SEED_SEG_SHIFT;
+	if (dq <= 0 || dq > max_dist_x) return INT32_MIN;
+	dr = (int32_t)(ai->x - aj->x);
+	if (sidi == sidj && (dr == 0 || dq > max_dist_y)) return INT32_MIN;
+	dd = dr > dq? dr - dq : dq - dr;
+	if (sidi == sidj && dd > bw) return INT32_MIN;
+	if (n_seg > 1 && !is_cdna && sidi == sidj && dr > max_dist_y) return INT32_MIN;
+	dg = dr < dq? dr : dq;
+	q_span = aj->y>>32&0xff;
+	sc = q_span < dg? q_span : dg;
+	if (dd || dg > q_span) {
+		float lin_pen, log_pen;
+		lin_pen = chn_pen_gap * (float)dd + chn_pen_skip * (float)dg;
+		log_pen = dd >= 1? mg_log2(dd + 1) : 0.0f; // mg_log2() only works for dd>=2
+		if (is_cdna || sidi != sidj) {
+			if (sidi != sidj && dr == 0) ++sc; // possibly due to overlapping paired ends; give a minor bonus
+			else if (dr > dq || sidi != sidj) sc -= (int)(lin_pen < log_pen? lin_pen : log_pen); // deletion or jump between paired ends
+			else sc -= (int)(lin_pen + .5f * log_pen);
+		} else sc -= (int)(lin_pen + .5f * log_pen);
+	}
+	return sc;
+}
+// mp_lchain_dp without backtracking
+void plchain_mg_lchain_dp_sc(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter, int min_cnt, int min_sc, float chn_pen_gap, float chn_pen_skip,
+					  int is_cdna, int n_seg, int64_t n, mm128_t *a, int32_t* f, uint16_t* p, void* km)
+{
+	int32_t *t, *v, mmax_f = 0, max_drop = bw;
+	int64_t i, j, max_ii, st = 0, n_iter = 0;
+ 
+	if (max_dist_x < bw) max_dist_x = bw;
+	if (max_dist_y < bw && !is_cdna) max_dist_y = bw;
+	if (is_cdna) max_drop = INT32_MAX;
+	KMALLOC(km, v, n);
+	KCALLOC(km, t, n);
+
+	// fill the score and backtrack arrays
+	for (i = 0, max_ii = -1; i < n; ++i) {
+        int64_t max_j = -1, end_j;
+        int32_t max_f = a[i].y>>32&0xff, n_skip = 0;
+		while (st < i && (a[i].x>>32 != a[st].x>>32 || a[i].x > a[st].x + max_dist_x)) ++st;
+		if (i - st > max_iter) st = i - max_iter;
+		for (j = i - 1; j >= st; --j) {
+			int32_t sc;
+			sc = comput_sc(&a[i], &a[j], max_dist_x, max_dist_y, bw, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
+			++n_iter;
+			if (sc == INT32_MIN) continue;
+			sc += f[j];
+			if (sc > max_f) {
+				max_f = sc, max_j = j;
+				if (n_skip > 0) --n_skip;
+			} else if (t[j] == (int32_t)i) {
+				if (++n_skip > max_skip)
+					break;
+			}
+			if (p[j] > 0) t[i - p[j]] = i;
+		}
+		end_j = j;
+		if (max_ii < 0 || a[i].x - a[max_ii].x > (int64_t)max_dist_x) {
+			int32_t max = INT32_MIN;
+			max_ii = -1;
+			for (j = i - 1; j >= st; --j)
+				if (max < f[j]) max = f[j], max_ii = j;
+		}
+		if (max_ii >= 0 && max_ii < end_j) {
+			int32_t tmp;
+			tmp = comput_sc(&a[i], &a[max_ii], max_dist_x, max_dist_y, bw, chn_pen_gap, chn_pen_skip, is_cdna, n_seg);
+			if (tmp != INT32_MIN && max_f < tmp + f[max_ii])
+				max_f = tmp + f[max_ii], max_j = max_ii;
+		}
+		f[i] = max_f, p[i] = i - max_j; // change to relative predecessor index
+		v[i] = max_j >= 0 && v[max_j] > max_f? v[max_j] : max_f; // v[] keeps the peak score up to i; f[] is the score ending at i, not always the peak
+		if (max_ii < 0 || (a[i].x - a[max_ii].x <= (int64_t)max_dist_x && f[max_ii] < f[i]))
+			max_ii = i;
+		if (mmax_f < max_f) mmax_f = max_f;
+	}
+
+}
+
+void plchain_handle_long_chain(hostMemPtr *host_mem, chain_read_t *reads, Misc misc, void* km){
+    for (int i = 0; i < host_mem->long_seg_count; i++) {
+        // Find which read this long segment belongs to
+        size_t index = 0;
+        int readid = 0;
+        for (; readid < host_mem->size; readid++) {
+            if (index + reads[readid].n >= host_mem->long_seg[i].end_idx) {
+                assert(index <= long_seg[i].start_idx);
+                break;
+            }
+            index += reads[readid].n;
+        }
+        // DEBUG: analyze long chain
+        fprintf(stderr, "[DEBUG] long segment: %ld anchors, ", host_mem->long_seg[i].end_idx - host_mem->long_seg[i].start_idx);
+        fprintf(stderr, " read %s (len %lu), %ld - %ld\n", reads[readid].seq.name, reads[readid].n, host_mem->long_seg[i].start_idx - index, host_mem->long_seg[i].end_idx - index);
+        plchain_mg_lchain_dp_sc(
+            misc.max_dist_x, misc.max_dist_y, misc.bw, misc.max_skip,
+            misc.max_iter, misc.min_cnt, misc.min_score, misc.chn_pen_gap,
+            misc.chn_pen_skip, misc.is_cdna, misc.n_seg,
+            host_mem->long_seg[i].end_idx - host_mem->long_seg[i].start_idx,
+            reads[readid].a + (host_mem->long_seg[i].start_idx - index),
+            host_mem->f + host_mem->long_seg[i].start_idx,
+            host_mem->p + host_mem->long_seg[i].start_idx, km);
+    }
+}
+#endif
+
 void plchain_cal_score_sync(chain_read_t *reads, int n_read, Misc misc, void* km) { 
     hostMemPtr host_mem;
     deviceMemPtr dev_mem;
@@ -259,11 +369,11 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
         cudaStreamSynchronize(stream_setup.streams[stream_id].cudastream);
 
 // #ifdef DEBUG_CHECK
+// DEBUG: Remove Debug prints
         size_t total_n = stream_setup.streams[stream_id].host_mem.total_n;
         chain_read_t* reads = stream_setup.streams[stream_id].reads;
         deviceMemPtr* dev_mem = &stream_setup.streams[stream_id].dev_mem;
         size_t cut_num = stream_setup.streams[stream_id].host_mem.cut_num;
-        // DEBUG: print seg numbers for each kernel
 
         unsigned int num_mid_seg, num_long_seg;
         cudaMemcpy(&num_mid_seg, dev_mem->d_mid_seg_count, sizeof(unsigned int),
@@ -300,6 +410,10 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
         }
         free(range);
         free(cut);
+#endif
+
+#ifdef CPU_LONG_SEG
+        plchain_handle_long_chain(&stream_setup.streams[stream_id].host_mem, stream_setup.streams[stream_id].reads, misc, km);
 #endif
         // cleanup previous batch in the stream
         plchain_backtracking(&stream_setup.streams[stream_id].host_mem,
@@ -392,21 +506,6 @@ void chain_blocking_gpu(const mm_idx_t *mi, const mm_mapopt_t *opt, chain_read_t
  * [in/out] n_read_: ptr to num of reads in array, updated to a batch launched in previous run
  *                  (NULL if no finishing batch)
 */
-
-// void chain_stream_gpu(const input_meta_t* meta, chain_read_t**in_arr_, int *n_read_) {
-//     static int batchid = 0;
-//     Misc misc = build_misc(INT64_MAX);
-//     plchain_cal_score_launch(in_arr_, n_read_, misc, stream_setup, batchid);
-//     batchid++;
-//     if (in_arr_){
-//         int n_read = *n_read_;
-//         chain_read_t* out_arr = *in_arr_;
-//         for (int i = 0; i < n_read; i++){
-//             post_chaining_helper(&out_arr[i], meta->refs, &out_arr[i].seq,
-//                                  misc.max_dist_x, out_arr[i].km);
-//         }
-//     }
-// }
 
 void chain_stream_gpu(const mm_idx_t *mi, const mm_mapopt_t *opt, chain_read_t **in_arr_, int *n_read_,
                       int thread_id, void* km) {

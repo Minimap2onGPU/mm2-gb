@@ -502,11 +502,6 @@ void plscore_sync_long_short_forward_dp(deviceMemPtr* dev_mem, Misc misc_) {
     #endif
     cudaCheck();
     cudaDeviceSynchronize();
-
-    cudaCheck();
-
-    cudaCheck();
-    cudaDeviceSynchronize();
     cudaCheck();
 }
 
