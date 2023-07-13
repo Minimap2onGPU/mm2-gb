@@ -10,22 +10,28 @@ CONFIG			+= $(if $(LONG_CUT),-DMM_LONG_SEG_CUTOFF=\($(LONG_CUT)\))
 ############  	CPU Compile 	###################
 ###################################################
 CU_SRC			= $(wildcard gpu/*.cu)
+CC_SRC			= $(wildcard gpu/*.c)
 CU_OBJS			= $(CU_SRC:%.cu=%.o)
+CU_OBJS			+= $(CC_SRC:%.c=%.o)
 INCLUDES		+= -I gpu
 
 ###################################################
 ############  	CUDA Compile 	###################
 ###################################################
 NVCC 			= nvcc
-CUDAFLAGS		= -rdc=true -DNDEBUG -lineinfo ## turn off assert
-CUDATESTFLAG	= -G
+CUDAFLAGS		= -rdc=true -lineinfo ## turn off assert
+CUDATESTFLAG	= -G -DNDEBUG ## turn off assert
 
 ###################################################
 ############	HIP Compile		###################
 ###################################################
 HIPCC			= hipcc
-HIPFLAGS		= -DUSEHIP -DNDEBUG ## turn off assert
-HIPTESTFLAGS	= -g
+HIPFLAGS		= -DUSEHIP
+HIPTESTFLAGS	= -g -DNDEBUG ## turn off assert 
+
+ifneq ($(PRINT_RESOURCE_USAGE), 0)
+	HIPTESTFLAGS += -Rpass-analysis=kernel-resource-usage
+endif
 
 ###################################################
 ############	DEBUG Options	###################
@@ -40,19 +46,19 @@ else
 	GPU_TESTFL	= $(CUDATESTFLAG)
 endif
 
-GPU_FLAGS += $(GPU_TESTFL)
+ifneq ($(NDEBUG), 0)
+	GPU_FLAGS 	+= $(GPU_TESTFL)
+	CFLAGS 		+= -DDEBUG_CHECK -DDEBUG_VERBOSE
+endif
 
-# check: CFLAGS += -DDEBUG_CHECK
-# check: HIPFLAGS += -DDEBUG_CHECK
-# check: CUDAFLAGS += -DDEBUG_CHECK
-# check: HIPFLAGS += $(HIPTESTFLAGS)
-# check: CUDAFLAGS += $(CUDATESTFLAG)
-
-# verbose: CFLAGS += -DDEBUG_VERBOSE
-# verbose: HIPFLAGS += -DDEBUG_VERBOSE
-# verbose: CUDAFLAGS += -DDEBUG_VERBOSE
+ifneq ($(CPU_LONG_SEG), 0)
+	CFLAGS += -D__CPU_LONG_SEG__=$(CPU_LONG_SEG)
+endif
 
 
+
+%.o: %.c
+	$(CC) -c $(CFLAGS) $(CPPFLAGS) $(INCLUDES) $(CONFIG) $< -o $@
 
 %.o: %.cu
 	$(GPU_CC) -c $(GPU_FLAGS) $(CFLAGS) $(CPPFLAGS) $(INCLUDES) $(CONFIG) $< -o $@
@@ -66,7 +72,7 @@ cleangpu:
 
 cudep: gpu/.depend
 
-gpu/.depend: $(CU_SRC)
+gpu/.depend: $(CU_SRC) $(CC_SRC)
 	rm -f gpu/.depend
 	$(GPU_CC) -c $(GPU_FLAGS) $(CFLAGS)  $(CPPFLAGS) $(INCLUDES) -MM $^ > $@
 

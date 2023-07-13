@@ -8,7 +8,7 @@
 #include <time.h>
 
 void plmem_malloc_host_mem(hostMemPtr *host_mem, size_t anchor_per_batch,
-                           int range_grid_size) {
+                           int range_grid_size, int num_cut) {
     // data array
     cudaMallocHost((void**)&host_mem->ax, anchor_per_batch * sizeof(int32_t));
     cudaMallocHost((void**)&host_mem->ay, anchor_per_batch * sizeof(int32_t));
@@ -16,6 +16,9 @@ void plmem_malloc_host_mem(hostMemPtr *host_mem, size_t anchor_per_batch,
     cudaMallocHost((void**)&host_mem->xrev, anchor_per_batch * sizeof(int32_t));
     cudaMallocHost((void**)&host_mem->f, anchor_per_batch * sizeof(int32_t));
     cudaMallocHost((void**)&host_mem->p, anchor_per_batch * sizeof(uint16_t));
+#ifdef __CPU_LONG_SEG__ // copy long segements to cpu
+    cudaMallocHost((void**)&host_mem->long_seg, num_cut/(MM_LONG_SEG_CUTOFF + 1) * sizeof(seg_t));
+#endif // CPU_LONG_SEG
 
     //index
     cudaMallocHost((void**)&host_mem->start_idx, range_grid_size * sizeof(size_t));
@@ -103,6 +106,7 @@ void plmem_reorg_input_arr(chain_read_t *reads, int n_read,
     size_t idx = 0;
     for (int i = 0; i < n_read; i++) {
         int n = reads[i].n;
+        if (n == 0) continue;
         int block_num = (n - 1) / config.anchor_per_block + 1;
 
         host_mem->start_idx[griddim] = idx;
@@ -118,7 +122,7 @@ void plmem_reorg_input_arr(chain_read_t *reads, int n_read,
             host_mem->cut_start_idx[griddim + j] = cut_num;
         }
         cut_num += (n - (block_num - 1) * config.anchor_per_block - 1) /
-                       config.blockdim;
+                       config.blockdim + 1;
         end_idx = idx + n;
 
         griddim += block_num;
@@ -206,7 +210,7 @@ void plmem_async_d2h_memcpy(stream_ptr_t *stream_ptrs) {
     cudaMemcpyAsync(host_mem->p, dev_mem->d_p,
                     sizeof(uint16_t) * host_mem->total_n,
                     cudaMemcpyDeviceToHost, *stream);
-#ifdef CPU_LONG_SEG // copy long segements to cpu
+#ifdef __CPU_LONG_SEG__ // copy long segements to cpu
     cudaMemcpyAsync(&host_mem->long_seg_count, dev_mem->d_long_seg_count,
                     sizeof(unsigned int),
                     cudaMemcpyDeviceToHost, *stream);
@@ -222,7 +226,7 @@ void plmem_sync_d2h_memcpy(hostMemPtr *host_mem, deviceMemPtr *dev_mem){
     cudaMemcpy(host_mem->p, dev_mem->d_p, sizeof(uint16_t) * host_mem->total_n,
                cudaMemcpyDeviceToHost);
 
-#ifdef CPU_LONG_SEG // copy long segements to cpu
+#ifdef __CPU_LONG_SEG__ // copy long segements to cpu
     cudaMemcpy(&host_mem->long_seg_count, dev_mem->d_long_seg_count,
                sizeof(unsigned int), cudaMemcpyDeviceToHost);
     cudaMemcpy(host_mem->long_seg, dev_mem->d_long_seg,
@@ -425,7 +429,7 @@ void plmem_stream_initialize(size_t *max_total_n_,
     // assert(num_stream > 1);
 
     stream_setup.streams = new stream_ptr_t[num_stream];
-#ifdef DEBUG_CHECK
+#if defined(DEBUG_CHECK)
     fprintf(
         stderr,
         "[Info] max anchors per stream: %zu, max range grid %zu max_num_cut %zu\n", max_anchors_stream, max_range_grid, max_num_cut);
@@ -437,7 +441,7 @@ void plmem_stream_initialize(size_t *max_total_n_,
         cudaEventCreate(&stream_setup.streams[i].cudaevent);
         cudaCheck();
         plmem_malloc_host_mem(&stream_setup.streams[i].host_mem, max_anchors_stream,
-                              max_range_grid);
+                              max_range_grid, max_num_cut);
         plmem_malloc_device_mem(&stream_setup.streams[i].dev_mem, max_anchors_stream,
                                 max_range_grid, max_num_cut);
     }

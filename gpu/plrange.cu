@@ -251,7 +251,7 @@ void plrange_async_range_selection(deviceMemPtr* dev_mem, cudaStream_t* stream) 
         dev_mem->d_ax, dev_mem->d_xrev, dev_mem->d_start_idx, dev_mem->d_read_end_idx,
         dev_mem->d_range, dev_mem->d_cut, dev_mem->d_cut_start_idx, total_n, range_kernel_config);
     cudaCheck();
-#ifdef DEBUG_VERBOSE
+#if defined(DEBUG_VERBOSE) && 0
     fprintf(stderr, "[Info] Range Kernel Launched, grid %d cut %d\n", DimGrid.x, cut_num);
 #endif
 }
@@ -269,27 +269,27 @@ void plrange_sync_range_selection(deviceMemPtr *dev_mem, Misc misc
     plrange_upload_misc(misc);
 
     // Run kernel
-#ifdef DEBUG_VERBOSE
+#if defined(DEBUG_VERBOSE) && 0
         fprintf(stderr, "Grim Dim: %d Cut: %zu Anchors: %zu\n", DimGrid.x,
                 cut_num, total_n);
 #endif
     range_selection_kernel_binary<<<DimGrid, DimBlock>>>(
         dev_mem->d_ax, dev_mem->d_xrev, dev_mem->d_start_idx, dev_mem->d_read_end_idx,
         dev_mem->d_range, dev_mem->d_cut, dev_mem->d_cut_start_idx, total_n, range_kernel_config);
-#ifdef DEBUG_VERBOSE
+#if defined(DEBUG_VERBOSE) && 0
     fprintf(stderr, "Kernel Launched\n");
 #endif
     cudaCheck();
     cudaDeviceSynchronize();
     cudaCheck();
-#ifdef DEBUG_VERBOSE
+#if defined(DEBUG_VERBOSE) && 0
     fprintf(stderr, "[M::%s] range calculation success\n", __func__);
 #endif
 
 
 
 
-#ifdef DEBUG_CHECK
+#if defined(DEBUG_CHECK) && 0
     //check range
     int32_t* range = (int32_t*)malloc(sizeof(int32_t) * total_n);
     cudaMemcpy(range, dev_mem->d_range, sizeof(int32_t) * total_n, cudaMemcpyDeviceToHost);
@@ -297,7 +297,7 @@ void plrange_sync_range_selection(deviceMemPtr *dev_mem, Misc misc
     size_t* cut = (size_t*)malloc(sizeof(size_t)*cut_num);
     cudaMemcpy(cut, dev_mem->d_cut, sizeof(size_t)*cut_num, cudaMemcpyDeviceToHost);
     for (int readid=0, cid=0, idx=0; readid<dev_mem->size; readid++){
-#ifdef DEBUG_VERBOSE
+#if defined(DEBUG_VERBOSE) && 0
         debug_print_cut(cut + cid, cut_num - cid, reads[readid].n, idx);
 #endif
         cid += debug_check_cut(cut + cid, range, cut_num - cid, reads[readid].n, idx);
@@ -305,7 +305,7 @@ void plrange_sync_range_selection(deviceMemPtr *dev_mem, Misc misc
     }
     int64_t read_start = 0;
     for (int i = 0; i<dev_mem->size; i++){
-#ifdef DEBUG_VERBOSE
+#if defined(DEBUG_VERBOSE) && 0
         debug_print_successor_range(range + read_start, reads[i].n);
 #endif
         // debug_check_range(range + read_start, input_arr[i].range, input_arr[i].n);

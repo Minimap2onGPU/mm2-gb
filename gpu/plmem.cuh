@@ -40,7 +40,7 @@ typedef struct {
     size_t *read_end_idx;
     size_t *cut_start_idx;
 
-#ifdef CPU_LONG_SEG
+#ifdef __CPU_LONG_SEG__
     // long segments
     seg_t* long_seg;
     unsigned int long_seg_count;
@@ -101,7 +101,7 @@ void plmem_stream_cleanup();
 
 // alloc and free
 void plmem_malloc_host_mem(hostMemPtr *host_mem, size_t anchor_per_batch,
-                           int range_grid_size);
+                           int range_grid_size, int num_cut);
 void plmem_free_host_mem(hostMemPtr *host_mem);
 void plmem_malloc_device_mem(deviceMemPtr *dev_mem, size_t anchor_per_batch,
                              int range_grid_size, int num_cut);

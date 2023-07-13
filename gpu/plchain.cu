@@ -11,6 +11,10 @@
 #include "plscore.cuh"
 #include "plchain.h"
 
+#ifdef DEBUG_CHECK
+#include "debug.h"
+#endif
+
 /**
  * translate relative predecessor index to abs index 
  * Input
@@ -77,12 +81,18 @@ void plchain_backtracking(hostMemPtr *host_mem, chain_read_t *reads, Misc misc, 
     int32_t* f = host_mem->f;
     for (int i = 0; i < n_read; i++) {
         int64_t* p;
+        int64_t n = reads[i].n;
+        if (n == 0 || reads[i].a == NULL) {
+            kfree(km, reads[i].a);
+            reads[i].a = NULL;
+            continue;
+        }
         KMALLOC(km, p, reads[i].n);
         p_rel2idx(p_hostmem, p, reads[i].n);
-#ifdef DEBUG_VERBOSE
+#if defined(DEBUG_VERBOSE) && 0
         debug_print_score(p, f, reads[i].n);
 #endif
-#ifdef DEBUG_CHECK
+#if defined(DEBUG_CHECK) && 0
         debug_check_score(p, f, reads[i].p, reads[i].f, reads[i].n);
 #endif
 
@@ -116,7 +126,7 @@ void plchain_backtracking(hostMemPtr *host_mem, chain_read_t *reads, Misc misc, 
     }
 }
 
-#ifdef CPU_LONG_SEG
+#ifdef __CPU_LONG_SEG__
 static inline int32_t comput_sc(const mm128_t *ai, const mm128_t *aj, int32_t max_dist_x, int32_t max_dist_y, int32_t bw, float chn_pen_gap, float chn_pen_skip, int is_cdna, int n_seg)
 {
 	int32_t dq = (int32_t)ai->y - (int32_t)aj->y, dr, dd, dg, q_span, sc;
@@ -147,14 +157,12 @@ static inline int32_t comput_sc(const mm128_t *ai, const mm128_t *aj, int32_t ma
 void plchain_mg_lchain_dp_sc(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter, int min_cnt, int min_sc, float chn_pen_gap, float chn_pen_skip,
 					  int is_cdna, int n_seg, int64_t n, mm128_t *a, int32_t* f, uint16_t* p, void* km)
 {
-	int32_t *t, *v, mmax_f = 0, max_drop = bw;
+	int32_t mmax_f = 0, max_drop = bw;
 	int64_t i, j, max_ii, st = 0, n_iter = 0;
  
 	if (max_dist_x < bw) max_dist_x = bw;
 	if (max_dist_y < bw && !is_cdna) max_dist_y = bw;
 	if (is_cdna) max_drop = INT32_MAX;
-	KMALLOC(km, v, n);
-	KCALLOC(km, t, n);
 
 	// fill the score and backtrack arrays
 	for (i = 0, max_ii = -1; i < n; ++i) {
@@ -170,12 +178,7 @@ void plchain_mg_lchain_dp_sc(int max_dist_x, int max_dist_y, int bw, int max_ski
 			sc += f[j];
 			if (sc > max_f) {
 				max_f = sc, max_j = j;
-				if (n_skip > 0) --n_skip;
-			} else if (t[j] == (int32_t)i) {
-				if (++n_skip > max_skip)
-					break;
-			}
-			if (p[j] > 0) t[i - p[j]] = i;
+			} 
 		}
 		end_j = j;
 		if (max_ii < 0 || a[i].x - a[max_ii].x > (int64_t)max_dist_x) {
@@ -191,29 +194,30 @@ void plchain_mg_lchain_dp_sc(int max_dist_x, int max_dist_y, int bw, int max_ski
 				max_f = tmp + f[max_ii], max_j = max_ii;
 		}
 		f[i] = max_f, p[i] = i - max_j; // change to relative predecessor index
-		v[i] = max_j >= 0 && v[max_j] > max_f? v[max_j] : max_f; // v[] keeps the peak score up to i; f[] is the score ending at i, not always the peak
 		if (max_ii < 0 || (a[i].x - a[max_ii].x <= (int64_t)max_dist_x && f[max_ii] < f[i]))
 			max_ii = i;
 		if (mmax_f < max_f) mmax_f = max_f;
 	}
-
 }
 
 void plchain_handle_long_chain(hostMemPtr *host_mem, chain_read_t *reads, Misc misc, void* km){
-    for (int i = 0; i < host_mem->long_seg_count; i++) {
+    fprintf(stderr, "long_seg %d\n", host_mem->long_seg_count);
+    int long_seg_count = host_mem->long_seg_count;
+    for (int i = 0; i < long_seg_count; i++) {
         // Find which read this long segment belongs to
         size_t index = 0;
         int readid = 0;
         for (; readid < host_mem->size; readid++) {
             if (index + reads[readid].n >= host_mem->long_seg[i].end_idx) {
-                assert(index <= long_seg[i].start_idx);
                 break;
             }
             index += reads[readid].n;
         }
+        
         // DEBUG: analyze long chain
-        fprintf(stderr, "[DEBUG] long segment: %ld anchors, ", host_mem->long_seg[i].end_idx - host_mem->long_seg[i].start_idx);
-        fprintf(stderr, " read %s (len %lu), %ld - %ld\n", reads[readid].seq.name, reads[readid].n, host_mem->long_seg[i].start_idx - index, host_mem->long_seg[i].end_idx - index);
+        fprintf(stderr, "[DEBUG] #%d >%s long segment: %ld anchors(%ld - %ld), ", readid, reads[readid].seq.name, host_mem->long_seg[i].end_idx - host_mem->long_seg[i].start_idx, host_mem->long_seg[i].start_idx, host_mem->long_seg[i].end_idx);
+        fprintf(stderr, "read len %ld (%ld - %ld), %ld-%ld\n", reads[readid].n, index, index + reads[readid].n, host_mem->long_seg[i].start_idx - index, host_mem->long_seg[i].end_idx - index);
+        assert(index <= host_mem->long_seg[i].start_idx && index + reads[readid].n >= host_mem->long_seg[i].end_idx);
         plchain_mg_lchain_dp_sc(
             misc.max_dist_x, misc.max_dist_y, misc.bw, misc.max_skip,
             misc.max_iter, misc.min_cnt, misc.min_score, misc.chn_pen_gap,
@@ -241,7 +245,7 @@ void plchain_cal_score_sync(chain_read_t *reads, int n_read, Misc misc, void* km
         cut_num += (reads[i].n - 1) / an_p_cut + 1;
     }
 
-    plmem_malloc_host_mem(&host_mem, total_n, griddim);
+    plmem_malloc_host_mem(&host_mem, total_n, griddim, cut_num);
     plmem_malloc_device_mem(&dev_mem, total_n, griddim, cut_num);
     plmem_reorg_input_arr(reads, n_read, &host_mem, range_kernel_config);
     // sanity check
@@ -368,8 +372,8 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
     if (stream_setup.streams[stream_id].busy) {
         cudaStreamSynchronize(stream_setup.streams[stream_id].cudastream);
 
-// #ifdef DEBUG_CHECK
-// DEBUG: Remove Debug prints
+#if defined(DEBUG_CHECK) && 1
+// print segment distributions
         size_t total_n = stream_setup.streams[stream_id].host_mem.total_n;
         chain_read_t* reads = stream_setup.streams[stream_id].reads;
         deviceMemPtr* dev_mem = &stream_setup.streams[stream_id].dev_mem;
@@ -381,7 +385,9 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
         cudaMemcpy(&num_long_seg, dev_mem->d_long_seg_count, sizeof(unsigned int),
                    cudaMemcpyDeviceToHost);
         fprintf(stderr, "[DEBUG] total segs: %lu, short:%lu mid: %u long: %u\n", cut_num, cut_num - num_mid_seg - num_long_seg, num_mid_seg, num_long_seg);
-#ifdef DEBUG_CHECK
+#endif 
+
+#if defined(DEBUG_CHECK) && 0
         // check range
         int32_t* range = (int32_t*)malloc(sizeof(int32_t) * total_n);
         cudaMemcpy(range, dev_mem->d_range, sizeof(int32_t) * total_n,
@@ -392,8 +398,8 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
                    cudaMemcpyDeviceToHost);
         for (int readid = 0, cid = 0, idx = 0; readid < dev_mem->size;
              readid++) {
-#ifdef DEBUG_VERBOSE
-            debug_print_cut(cut + cid, cut_num - cid, reads[readid].n, idx);
+#if defined(DEBUG_VERBOSE) && 0
+            debug_print_cut(cut + cid, cut_num - cid, reads[readid].n, idx, NULL);
 #endif
             cid += debug_check_cut(cut + cid, range, cut_num - cid,
                                    reads[readid].n, idx);
@@ -401,7 +407,7 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
         }
         int64_t read_start = 0;
         for (int i = 0; i < dev_mem->size; i++) {
-#ifdef DEBUG_VERBOSE
+#if defined(DEBUG_VERBOSE) && 0
             debug_print_successor_range(range + read_start, reads[i].n);
 #endif
             // debug_check_range(range + read_start, input_arr[i].range,
@@ -410,9 +416,9 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
         }
         free(range);
         free(cut);
-#endif
+#endif // DEBUG_CHECK
 
-#ifdef CPU_LONG_SEG
+#ifdef __CPU_LONG_SEG__
         plchain_handle_long_chain(&stream_setup.streams[stream_id].host_mem, stream_setup.streams[stream_id].reads, misc, km);
 #endif
         // cleanup previous batch in the stream
@@ -511,8 +517,6 @@ void chain_stream_gpu(const mm_idx_t *mi, const mm_mapopt_t *opt, chain_read_t *
                       int thread_id, void* km) {
     // assume only one seg. and qlen_sum desn't matter
     assert(opt->max_frag_len <= 0);
-    assert(!!(opt->flag & MM_F_SR));
-    assert(in_arr[0].n_seg == 1);
     Misc misc = build_misc(mi, opt, 0, 1);
     plchain_cal_score_async(in_arr_, n_read_, misc, stream_setup, thread_id, km);
     if (in_arr_) {
@@ -592,7 +596,6 @@ void finish_stream_gpu(const mm_idx_t *mi, const mm_mapopt_t *opt, chain_read_t*
     // assume only one seg. and qlen_sum desn't matter
     assert(opt->max_frag_len <= 0);
     assert(!!(opt->flag & MM_F_SR));
-    assert(in_arr[0].n_seg == 1);
     Misc misc = build_misc(mi, opt, 0, 1);
     /* Sync all the pending batches + backtracking */
     if (!stream_setup.streams[t].busy) {

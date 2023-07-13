@@ -12,6 +12,7 @@
 
 #ifdef DEBUG_VERBOSE
 
+char debug_folder[100] = "debug";
 /////////////////////////////////////////////////////////////////////
 ///////////        Print Input Files            /////////////////////
 /////////////////////////////////////////////////////////////////////
@@ -33,7 +34,7 @@ void debug_output_anchors(const char debug_folder[], chain_read_t *in) {
 
     /* Write Sequence Name and Length, rep_len*/
     fprintf(f_anchors, "<%s\t%d\n", in->seq.name, in->seq.len);
-    fprintf(f_anchors, "*%d\n", in->seq.rep_len);
+    fprintf(f_anchors, "*%d\n", in->seq.len);
 
     /* Read Number of Anchors */
     fprintf(f_anchors, "#%d\n", in->n);
@@ -323,7 +324,7 @@ int debug_build_score(chain_read_t *in, void *km) {
     KMALLOC(km, in->f, in->n);
 
     Misc misc = build_misc(INT64_MAX);
-    mg_lchain_dp(misc.max_dist_x, misc.max_dist_y, misc.bw, misc.max_skip,
+    mg_lchain_dp_check(misc.max_dist_x, misc.max_dist_y, misc.bw, misc.max_skip,
                  misc.max_iter, misc.min_cnt, misc.min_score, 0.12,
                  misc.chn_pen_skip, misc.is_cdna, misc.n_seg, in->n, in->a,
                  &in->n_u, &in->u, in->km, in, in->f, in->p);

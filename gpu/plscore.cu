@@ -398,7 +398,7 @@ void plscore_async_long_short_forward_dp(deviceMemPtr* dev_mem, cudaStream_t* st
     #endif
     cudaCheck();
 
-#ifdef DEBUG_VERBOSE
+#if defined(DEBUG_VERBOSE) && 0
     fprintf(stderr, "[M::%s] score generation success\n", __func__);
 #endif
     
@@ -419,7 +419,7 @@ void plscore_async_naive_forward_dp(deviceMemPtr* dev_mem,
         dev_mem->d_ax, dev_mem->d_ay, dev_mem->d_sid, dev_mem->d_range, dev_mem->d_cut,
         dev_mem->d_f, dev_mem->d_p, total_n, cut_num);
     cudaCheck();
-#ifdef DEBUG_VERBOSE
+#if defined(DEBUG_VERBOSE) && 0
     fprintf(stderr, "[M::%s] score generation kernel launch success\n", __func__);
 #endif
 
@@ -460,8 +460,8 @@ void plscore_sync_long_short_forward_dp(deviceMemPtr* dev_mem, Misc misc_) {
     cudaCheck();
     cudaDeviceSynchronize();
 
-#ifdef DEBUG_CHECK
-    /* DEBUG: check long_segs */
+#if defined(DEBUG_CHECK) && 0
+    /* check long_segs */
     seg_t* long_seg;
     unsigned int long_seg_count;
     cudaMemcpy(&long_seg_count, dev_mem->d_long_seg_count, sizeof(unsigned int), cudaMemcpyDeviceToHost);
@@ -473,7 +473,7 @@ void plscore_sync_long_short_forward_dp(deviceMemPtr* dev_mem, Misc misc_) {
     // }
     free(long_seg);
 
-    /* DEBUG: check elapsed clock */
+    /* check elapsed clock */
     // cudaMemcpy(elapsed_clk, d_clk, sizeof(long long int)*DimGrid.x, cudaMemcpyDeviceToHost);
 #endif // DEBUG_CHECK
 
