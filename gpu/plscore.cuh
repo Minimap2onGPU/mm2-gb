@@ -13,7 +13,7 @@ extern "C"{
 #endif
 
 #ifndef MM_LONG_SEG_CUTOFF
-#define MM_LONG_SEG_CUTOFF 10
+#define MM_LONG_SEG_CUTOFF 100
 #endif
 
 #define MM_QSPAN 15 

@@ -20,14 +20,14 @@ INCLUDES		+= -I gpu
 ###################################################
 NVCC 			= nvcc
 CUDAFLAGS		= -rdc=true -lineinfo ## turn off assert
-CUDATESTFLAG	= -G -DNDEBUG ## turn off assert
+CUDATESTFLAG	= -G
 
 ###################################################
 ############	HIP Compile		###################
 ###################################################
 HIPCC			= hipcc
 HIPFLAGS		= -DUSEHIP
-HIPTESTFLAGS	= -g -DNDEBUG ## turn off assert 
+HIPTESTFLAGS	= -g   
 
 ifneq ($(PRINT_RESOURCE_USAGE), 0)
 	HIPTESTFLAGS += -Rpass-analysis=kernel-resource-usage
@@ -46,8 +46,12 @@ else
 	GPU_TESTFL	= $(CUDATESTFLAG)
 endif
 
-ifneq ($(NDEBUG), 0)
-	GPU_FLAGS 	+= $(GPU_TESTFL)
+ifeq ($(NDEBUG), 1)
+	CFLAGS 	+= -DNDEBUG
+endif
+
+ifneq ($(DEBUG), 0)
+	GPU_FLAGS += $(GPU_TESTFL)
 	CFLAGS 		+= -DDEBUG_CHECK -DDEBUG_VERBOSE
 endif
 

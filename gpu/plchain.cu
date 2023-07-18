@@ -82,9 +82,11 @@ void plchain_backtracking(hostMemPtr *host_mem, chain_read_t *reads, Misc misc, 
     for (int i = 0; i < n_read; i++) {
         int64_t* p;
         int64_t n = reads[i].n;
+        reads[i].n_u = 0;
+        reads[i].u = NULL;
         if (n == 0 || reads[i].a == NULL) {
             kfree(km, reads[i].a);
-            reads[i].a = NULL;
+            reads[i].a = 0;
             continue;
         }
         KMALLOC(km, p, reads[i].n);
@@ -201,7 +203,6 @@ void plchain_mg_lchain_dp_sc(int max_dist_x, int max_dist_y, int bw, int max_ski
 }
 
 void plchain_handle_long_chain(hostMemPtr *host_mem, chain_read_t *reads, Misc misc, void* km){
-    fprintf(stderr, "long_seg %d\n", host_mem->long_seg_count);
     int long_seg_count = host_mem->long_seg_count;
     for (int i = 0; i < long_seg_count; i++) {
         // Find which read this long segment belongs to
@@ -215,8 +216,8 @@ void plchain_handle_long_chain(hostMemPtr *host_mem, chain_read_t *reads, Misc m
         }
         
         // DEBUG: analyze long chain
-        fprintf(stderr, "[DEBUG] #%d >%s long segment: %ld anchors(%ld - %ld), ", readid, reads[readid].seq.name, host_mem->long_seg[i].end_idx - host_mem->long_seg[i].start_idx, host_mem->long_seg[i].start_idx, host_mem->long_seg[i].end_idx);
-        fprintf(stderr, "read len %ld (%ld - %ld), %ld-%ld\n", reads[readid].n, index, index + reads[readid].n, host_mem->long_seg[i].start_idx - index, host_mem->long_seg[i].end_idx - index);
+        fprintf(stderr, "[DEBUG], #%d, >%s, long segment len, %ld, (%ld - %ld), ", readid, reads[readid].seq.name, host_mem->long_seg[i].end_idx - host_mem->long_seg[i].start_idx, host_mem->long_seg[i].start_idx, host_mem->long_seg[i].end_idx);
+        fprintf(stderr, "read len, %ld, (%ld - %ld), relative index, (%ld - %ld)\n", reads[readid].n, index, index + reads[readid].n, host_mem->long_seg[i].start_idx - index, host_mem->long_seg[i].end_idx - index);
         assert(index <= host_mem->long_seg[i].start_idx && index + reads[readid].n >= host_mem->long_seg[i].end_idx);
         plchain_mg_lchain_dp_sc(
             misc.max_dist_x, misc.max_dist_y, misc.bw, misc.max_skip,
@@ -595,7 +596,6 @@ void finish_stream_gpu(const mm_idx_t *mi, const mm_mapopt_t *opt, chain_read_t*
                        int* n_read_, int t, void* km) {
     // assume only one seg. and qlen_sum desn't matter
     assert(opt->max_frag_len <= 0);
-    assert(!!(opt->flag & MM_F_SR));
     Misc misc = build_misc(mi, opt, 0, 1);
     /* Sync all the pending batches + backtracking */
     if (!stream_setup.streams[t].busy) {
@@ -608,6 +608,7 @@ void finish_stream_gpu(const mm_idx_t *mi, const mm_mapopt_t *opt, chain_read_t*
     int n_read;
     cudaStreamSynchronize(stream_setup.streams[t].cudastream);
     cudaCheck();
+    plchain_handle_long_chain(&stream_setup.streams[t].host_mem, stream_setup.streams[t].reads, misc, km);
     plchain_backtracking(&stream_setup.streams[t].host_mem,
                          stream_setup.streams[t].reads, misc, km);
     reads = stream_setup.streams[t].reads;

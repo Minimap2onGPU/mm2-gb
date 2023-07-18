@@ -1,6 +1,7 @@
-CPU_LONG_SEG 			:= 0
+CPU_LONG_SEG 			:= 1
 PRINT_RESOURCE_USAGE	:= 0
-NDEBUG					:= 1 # turn off assert and all debug prints.    
+NDEBUG					:= 0 # turn off assert
+DEBUG					:= 1 # turn on debug prints
 CFLAGS=		-g -O2 # -Wall -Wc++-compat #-Wextra
 CPPFLAGS=	-DHAVE_KALLOC -D__AMD_SPLIT_KERNELS__  # -Wno-unused-but-set-variable -Wno-unused-variable
 INCLUDES=	-I .
