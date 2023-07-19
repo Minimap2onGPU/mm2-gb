@@ -70,6 +70,7 @@ void mm_trbuf_batch_init(mm_batch_trbuf_t *batch_, int batch_max_reads) {
     batch_->count = 0;
     batch_->total_n = 0;
     batch_->reads = (chain_read_t *)malloc(sizeof(chain_read_t) * batch_max_reads);
+    memset(batch_->reads, 0, sizeof(chain_read_t) * batch_max_reads);
     batch_->batchid = -1;
     batch_->km = km_init();
 }

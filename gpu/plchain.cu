@@ -214,10 +214,13 @@ void plchain_handle_long_chain(hostMemPtr *host_mem, chain_read_t *reads, Misc m
             }
             index += reads[readid].n;
         }
-        
+
+
+#if defined(DEBUG_CHECK) && 1
         // DEBUG: analyze long chain
         fprintf(stderr, "[DEBUG], #%d, >%s, long segment len, %ld, (%ld - %ld), ", readid, reads[readid].seq.name, host_mem->long_seg[i].end_idx - host_mem->long_seg[i].start_idx, host_mem->long_seg[i].start_idx, host_mem->long_seg[i].end_idx);
         fprintf(stderr, "read len, %ld, (%ld - %ld), relative index, (%ld - %ld)\n", reads[readid].n, index, index + reads[readid].n, host_mem->long_seg[i].start_idx - index, host_mem->long_seg[i].end_idx - index);
+#endif // DEBUG_CHECK
         assert(index <= host_mem->long_seg[i].start_idx && index + reads[readid].n >= host_mem->long_seg[i].end_idx);
         plchain_mg_lchain_dp_sc(
             misc.max_dist_x, misc.max_dist_y, misc.bw, misc.max_skip,
@@ -372,7 +375,9 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
     int stream_id = thread_id;
     if (stream_setup.streams[stream_id].busy) {
         cudaStreamSynchronize(stream_setup.streams[stream_id].cudastream);
-
+#if defined(DEBUG_CHECK) && 1
+    fprintf(stderr, "[INFO] Async kernel FINISHED on stream #%d, read %lu, anchors %lu\n", stream_id, stream_setup.streams[stream_id].host_mem.size,  stream_setup.streams[stream_id].host_mem.total_n);
+#endif // DEBUG_CHECK
 #if defined(DEBUG_CHECK) && 1
 // print segment distributions
         size_t total_n = stream_setup.streams[stream_id].host_mem.total_n;
@@ -469,6 +474,9 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
     plmem_async_d2h_memcpy(&stream_setup.streams[stream_id]);
     cudaEventRecord(stream_setup.streams[stream_id].cudaevent,
                     stream_setup.streams[stream_id].cudastream);
+#if defined(DEBUG_CHECK) && 1
+    fprintf(stderr, "[INFO] Async kernel LAUNCH on stream #%d, read%lu, anchors %lu, cut_num %lu\n", stream_id, n_read, total_n, cut_num);
+#endif // DEBUG_CHECK
     stream_setup.streams[stream_id].busy = true;
     stream_setup.streams[stream_id].reads = reads;
     cudaCheck();
@@ -607,8 +615,13 @@ void finish_stream_gpu(const mm_idx_t *mi, const mm_mapopt_t *opt, chain_read_t*
     chain_read_t* reads;
     int n_read;
     cudaStreamSynchronize(stream_setup.streams[t].cudastream);
+#if defined(DEBUG_CHECK) && 1
+    fprintf(stderr, "[INFO] Last Async kernel FINISHED on stream #%d, read %lu, anchors %lu\n", t, stream_setup.streams[t].host_mem.size, stream_setup.streams[t].host_mem.total_n);
+#endif // DEBUG_CHECK
     cudaCheck();
+#ifdef __CPU_LONG_SEG__
     plchain_handle_long_chain(&stream_setup.streams[t].host_mem, stream_setup.streams[t].reads, misc, km);
+#endif // __CPU_LONG_SEG__
     plchain_backtracking(&stream_setup.streams[t].host_mem,
                          stream_setup.streams[t].reads, misc, km);
     reads = stream_setup.streams[t].reads;
