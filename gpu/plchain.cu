@@ -398,8 +398,44 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
                    cudaMemcpyDeviceToHost);
         fprintf(stderr, "[DEBUG] total segs: %lu, short:%lu mid: %u long: %u\n", cut_num, cut_num - num_mid_seg - num_long_seg, num_mid_seg, num_long_seg);
 
+#if defined(DEBUG_CHECK) && 1
+        // check range
+        int32_t* range = (int32_t*)malloc(sizeof(int32_t) * total_n);
+        cudaMemcpy(range, dev_mem->d_range, sizeof(int32_t) * total_n,
+                    cudaMemcpyDeviceToHost);
+                int64_t read_start = 0;
+        for (int i = 0; i < dev_mem->size; i++) {
+    #if defined(DEBUG_VERBOSE) && 1
+            debug_print_successor_range(range + read_start, reads[i].n);
+    #endif
+            // debug_check_range(range + read_start, input_arr[i].range,
+            // input_arr[i].n);
+            read_start += reads[i].n;
+        }
+#endif // DEBUG_CHECK
+
+#if defined(DEBUG_CHECK) && 0
+
+        size_t* cut = (size_t*)malloc(sizeof(size_t) * cut_num);
+        cudaMemcpy(cut, dev_mem->d_cut, sizeof(size_t) * cut_num,
+                   cudaMemcpyDeviceToHost);
+        for (int readid = 0, cid = 0, idx = 0; readid < dev_mem->size;
+             readid++) {
+#if defined(DEBUG_VERBOSE) && 0
+            debug_print_cut(cut + cid, cut_num - cid, reads[readid].n, idx, NULL);
+#endif
+            cid += debug_check_cut(cut + cid, range, cut_num - cid,
+                                   reads[readid].n, idx);
+            idx += reads[readid].n;
+        }
+        free(range);
+        free(cut);
+#endif // DEBUG_CHECK
+
+#if defined(DEBUG_VERBOSE) && 0
         plchain_cal_long_seg_range_dis(total_n, dev_mem);
         plchain_cal_range_dis(total_n, cut_num, dev_mem);
+#endif // DEBUG_VERBOSE
 
         // cleanup previous batch in the stream
         plchain_backtracking(&stream_setup.streams[stream_id].host_mem,
@@ -605,14 +641,13 @@ void finish_stream_gpu(const mm_idx_t *mi, const mm_mapopt_t *opt, chain_read_t*
     chain_read_t* reads;
     int n_read;
     cudaStreamSynchronize(stream_setup.streams[t].cudastream);
+#if defined(DEBUG_CHECK) && 1
+    fprintf(stderr, "[INFO] Last Async kernel FINISHED on stream #%d, read %lu, anchors %lu\n", t, stream_setup.streams[t].host_mem.size, stream_setup.streams[t].host_mem.total_n);
+#endif // DEBUG_CHECK
     cudaCheck();
-
-    size_t total_n = stream_setup.streams[t].host_mem.total_n;
-    size_t cut_num = stream_setup.streams[t].host_mem.cut_num;
-    deviceMemPtr* dev_mem = &stream_setup.streams[t].dev_mem;
-    plchain_cal_long_seg_range_dis(total_n, dev_mem);
-    plchain_cal_range_dis(total_n, cut_num, dev_mem);
-        
+#ifdef __CPU_LONG_SEG__
+    plchain_handle_long_chain(&stream_setup.streams[t].host_mem, stream_setup.streams[t].reads, misc, km);
+#endif // __CPU_LONG_SEG__
     plchain_backtracking(&stream_setup.streams[t].host_mem,
                          stream_setup.streams[t].reads, misc, km);
     reads = stream_setup.streams[t].reads;
