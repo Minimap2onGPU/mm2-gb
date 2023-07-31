@@ -47,6 +47,7 @@ extern lisa_hash<uint64_t, uint64_t> *lh;
 
 #ifdef MANUAL_PROFILING
 extern uint64_t num_reads, minimizer_hit_time, dp_chaining_time, alignment_time;
+extern double chaining_time;
 #endif
 
 
@@ -436,6 +437,10 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 			fprintf(stderr, "SD\t%s\t%d\t%c\t%d\t%d\t%d\n", mi->seq[a[i].x<<1>>33].name, (int32_t)a[i].x, "+-"[a[i].x>>63], (int32_t)a[i].y, (int32_t)(a[i].y>>32&0xff),
 					i == 0? 0 : ((int32_t)a[i].y - (int32_t)a[i-1].y) - ((int32_t)a[i].x - (int32_t)a[i-1].x));
 	}
+	
+#ifdef MANUAL_PROFILING
+	double chain_start = realtime();
+#endif
 
 	// set max chaining gap on the query and the reference sequence
 	if (is_sr)
@@ -481,6 +486,10 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 			a = mm_chain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score, opt->chain_gap_scale, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
 		}
 	}
+#ifdef MANUAL_PROFILING
+	chaining_time += (realtime() - chain_start);
+#endif
+
 	b->frag_gap = max_chain_gap_ref;
 	b->rep_len = rep_len;
 

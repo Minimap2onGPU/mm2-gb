@@ -43,6 +43,7 @@ using namespace std;
 
 #ifdef MANUAL_PROFILING
 uint64_t num_reads = 0, minimizer_hit_time = 0, dp_chaining_time = 0, alignment_time = 0;
+double chaining_time = 0;
 #endif
 
 #ifdef LISA_HASH
@@ -523,9 +524,14 @@ int main(int argc, char *argv[])
 
 #ifdef MANUAL_PROFILING
 		fprintf(stderr, "\n Number of reads = %lld Minimizer hit time = %lld dp_chaining time = %lld alignment time = %lld total time = %lld \n", num_reads, minimizer_hit_time, dp_chaining_time, alignment_time, __rdtsc() - total_time);
+		fprintf(stderr, "\n Total chaining time = %f sec \n", chaining_time);
 #endif
+	double total_mapping_time = realtime() - mapping_time;
 	fprintf(stderr, "Total ticks: %lld \n",__rdtsc() - total_time);
-	fprintf(stderr, "\nMapping Real time: %.3f sec;\n", realtime() - mapping_time);
+	fprintf(stderr, "\nMapping Real time: %.3f sec;\n", total_mapping_time);
+#ifdef MANUAL_PROFILING
+		fprintf(stderr, "\n Total chaining time = %f sec, Frac chaining/mapping = %f \n", chaining_time, chaining_time/total_mapping_time);
+#endif
 #ifdef LISA_HASH
 	delete lh;
 #endif	
