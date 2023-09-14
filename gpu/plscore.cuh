@@ -7,8 +7,16 @@
 #ifdef __cplusplus
 extern "C"{
 #endif
+
+#ifndef MM_MID_SEG_CUTOFF
 #define MM_MID_SEG_CUTOFF 1
-#define MM_LONG_SEG_CUTOFF 9
+#endif
+
+#ifndef MM_LONG_SEG_CUTOFF
+#define MM_LONG_SEG_CUTOFF 10
+#endif
+
+#define MM_QSPAN 15 
 
 void plscore_upload_misc(Misc misc);
 void plscore_async_naive_forward_dp(deviceMemPtr* dev_mem, cudaStream_t* stream);

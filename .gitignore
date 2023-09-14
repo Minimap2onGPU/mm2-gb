@@ -14,5 +14,7 @@ Log/**
 debug/**
 verf
 trace
-*.sh
 ncu
+nsys
+profile_output*
+workloads
