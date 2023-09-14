@@ -79,10 +79,10 @@ void plchain_backtracking(hostMemPtr *host_mem, chain_read_t *reads, Misc misc, 
         int64_t* p;
         KMALLOC(km, p, reads[i].n);
         p_rel2idx(p_hostmem, p, reads[i].n);
-#ifdef DEBUG_VERBOSE
+#if defined(DEBUG_VERBOSE) && 0
         debug_print_score(p, f, reads[i].n);
 #endif
-#ifdef DEBUG_CHECK
+#if defined(DEBUG_CHECK) && 0
         debug_check_score(p, f, reads[i].p, reads[i].f, reads[i].n);
 #endif
 
@@ -342,6 +342,57 @@ void plchain_cal_range_dis(size_t total_n, size_t num_cut, deviceMemPtr* dev_mem
     free(range);
 }
 
+// DEBUG: sc pair vs. seg length
+void plchain_cal_sc_pair_density(size_t total_n, size_t num_cut, deviceMemPtr* dev_mem){
+    // bin width: 10 cuts, max 50000 cuts
+    static uint64_t sc_pair_dis[5001] = {0}; // number of sc pairs for each seg length
+    static uint64_t anchors_dis[5001] = {0};
+    size_t* cut = (size_t*)malloc(sizeof(size_t) * num_cut);
+    cudaMemcpy(cut, dev_mem->d_cut, sizeof(size_t) * num_cut, cudaMemcpyDeviceToHost);
+
+    int32_t* range = (int32_t*)malloc(sizeof(int32_t) * total_n);
+    cudaMemcpy(range, dev_mem->d_range, sizeof(int32_t) * total_n, cudaMemcpyDeviceToHost);
+
+    uint64_t start_idx = 0, cut_size = 0;
+    for (int cid = 0; cid < num_cut; cid++) {
+        if (cut[cid] != SIZE_MAX) {
+            uint64_t sc_pair_num = 0;
+            for (uint64_t i = start_idx; i < cut[cid]; i++){
+                sc_pair_num += range[i];
+            }
+            if (cut_size/10 < 5000) {
+                sc_pair_dis[cut_size/10] += sc_pair_num;
+                anchors_dis[cut_size/10] += cut[cid] - start_idx;
+            } else {
+                sc_pair_dis[5000] += sc_pair_num;
+                anchors_dis[5000] += cut[cid] - start_idx;
+            }
+            cut_size = 0;
+            start_idx = cut[cid];
+        } else {
+            ++cut_size;
+        }
+    }
+    free(range);
+    free(cut);
+
+    fprintf(stderr, "[DEBUG] seg_len\t");
+    for (int i = 0; i < 5000; i++){
+        fprintf(stderr, "%d\t", i*10);
+    }
+    fprintf(stderr, "50000+\n");
+    fprintf(stderr, "[DEBUG] sc_pairs\t");
+    for (int i = 0; i <= 5000; i++){
+        fprintf(stderr, "%lu\t", sc_pair_dis[i]);
+    }
+    fprintf(stderr, "\n");
+    fprintf(stderr, "[DEBUG] anchors\t");
+    for (int i = 0; i <= 5000; i++){
+        fprintf(stderr, "%lu\t", anchors_dis[i]);
+    }
+    fprintf(stderr, "\n");
+}
+
 // plchain_print_cuts(size_t total_n, deviceMemPtr* dev_mem, chain_read_t* reads, size_t cut_num){
 //     // check range
 //     int32_t* range = (int32_t*)malloc(sizeof(int32_t) * total_n);
@@ -398,7 +449,7 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
                    cudaMemcpyDeviceToHost);
         fprintf(stderr, "[DEBUG] total segs: %lu, short:%lu mid: %u long: %u\n", cut_num, cut_num - num_mid_seg - num_long_seg, num_mid_seg, num_long_seg);
 
-#if defined(DEBUG_CHECK) && 1
+#if defined(DEBUG_CHECK) && 0
         // check range
         int32_t* range = (int32_t*)malloc(sizeof(int32_t) * total_n);
         cudaMemcpy(range, dev_mem->d_range, sizeof(int32_t) * total_n,
@@ -431,6 +482,10 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
         free(range);
         free(cut);
 #endif // DEBUG_CHECK
+
+#if defined(DEBUG_VERBOSE) && 1
+        plchain_cal_sc_pair_density(total_n, cut_num, dev_mem);
+#endif // DEBUG_VERBOSE
 
 #if defined(DEBUG_VERBOSE) && 0
         plchain_cal_long_seg_range_dis(total_n, dev_mem);

@@ -15,15 +15,15 @@ INCLUDES		+= -I gpu
 ############  	CUDA Compile 	###################
 ###################################################
 NVCC 			= nvcc
-CUDAFLAGS		= -rdc=true -DNDEBUG -lineinfo ## turn off assert
-CUDATESTFLAG	= -G
+CUDAFLAGS		= -rdc=true -DNDEBUG -lineinfo ## turn off assert 
+CUDATESTFLAG	= -G -DDEBUG_CHECK -DDEBUG_VERBOSE
 
 ###################################################
 ############	HIP Compile		###################
 ###################################################
 HIPCC			= hipcc
-HIPFLAGS		= -DUSEHIP -DNDEBUG -Rpass-analysis=kernel-resource-usage ## turn off assert
-HIPTESTFLAGS	= -g
+HIPFLAGS		= -DUSEHIP -DNDEBUG -Rpass-analysis=kernel-resource-usage ## turn off assert  
+HIPTESTFLAGS	= -g -DDEBUG_CHECK -DDEBUG_VERBOSE
 
 ###################################################
 ############	DEBUG Options	###################
@@ -36,6 +36,10 @@ else
 	GPU_CC 		= $(NVCC)
 	GPU_FLAGS	= $(CUDAFLAGS)
 	GPU_TESTFL	= $(CUDATESTFLAG)
+endif
+
+ifeq ($(PRINT_DEBUG), 1)
+	GPU_FLAGS	+= $(GPU_TESTFL)
 endif
 
 # check: CFLAGS += -DDEBUG_CHECK
