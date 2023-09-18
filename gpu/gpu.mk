@@ -25,7 +25,7 @@ CUDATESTFLAG	= -G -DDEBUG_CHECK -DDEBUG_VERBOSE
 ###################################################
 HIPCC			= hipcc
 HIPFLAGS		= -DUSEHIP -DNDEBUG -Rpass-analysis=kernel-resource-usage ## turn off assert  
-HIPTESTFLAGS	= -g -DDEBUG_CHECK -DDEBUG_VERBOSE
+HIPTESTFLAGS	= -g  -DDEBUG_VERBOSE #-DDEBUG_CHECK
 
 ###################################################
 ############	DEBUG Options	###################
