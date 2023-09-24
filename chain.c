@@ -66,6 +66,11 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
 		kfree(km, a);
 		return 0;
 	}
+	// FIXME: change n -> long_seg_length, a -> long segment start
+	// [DEBUG], #113, >4f452f4a-d82a-4580-981b-32d14b997217, long segment len, 827903, (129243256 - 130071159), read len, 1531639, (128813176 - 130344815), relative index, (430080 - 1257983)
+	// n = 827903;
+	// a += 430080;
+	
 	f = (uint32_t*)kmalloc(km, n * 4);
 	p = (int32_t*)kmalloc(km, n * 4);
 	t = (int32_t*)kmalloc(km, n * 4);
@@ -88,6 +93,7 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
 	create_SoA_Anchors_32_bit(anchors, n, anchor_r, anchor_q, anchor_l);
 
 	dp_chain obj(max_dist_x, max_dist_y, bw, max_skip, max_iter, gap_scale, is_cdna, n_segs);
+	// n -> long seg_lenth, 
 	obj.mm_dp_vectorized(n, &anchors[0], anchor_r, anchor_q, anchor_l, f, p, v, max_dist_x, max_dist_y, NULL, NULL);	
 
 	// -16 is due to extra padding at the start of arrays
@@ -214,22 +220,23 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
 	}
 
 	// backtrack
+	// FIXME: temporarily disable backtrack for profiling
 	memset(t, 0, n * 4);
-	for (i = n_v = k = 0; i < n_u; ++i) { // starting from the highest score
-		int32_t n_v0 = n_v, k0 = k;
-		j = (int32_t)u[i];
-		do {
-			v[n_v++] = j;
-			t[j] = 1;
-			j = p[j];
-		} while (j >= 0 && t[j] == 0);
-		if (j < 0) {
-			if (n_v - n_v0 >= min_cnt) u[k++] = u[i]>>32<<32 | (n_v - n_v0);
-		} else if ((int32_t)(u[i]>>32) - f[j] >= min_sc) {
-			if (n_v - n_v0 >= min_cnt) u[k++] = ((u[i]>>32) - f[j]) << 32 | (n_v - n_v0);
-		}
-		if (k0 == k) n_v = n_v0; // no new chain added, reset
-	}
+	// for (i = n_v = k = 0; i < n_u; ++i) { // starting from the highest score
+	// 	int32_t n_v0 = n_v, k0 = k;
+	// 	j = (int32_t)u[i];
+	// 	do {
+	// 		v[n_v++] = j;
+	// 		t[j] = 1;
+	// 		j = p[j];
+	// 	} while (j >= 0 && t[j] == 0);
+	// 	if (j < 0) {
+	// 		if (n_v - n_v0 >= min_cnt) u[k++] = u[i]>>32<<32 | (n_v - n_v0);
+	// 	} else if ((int32_t)(u[i]>>32) - f[j] >= min_sc) {
+	// 		if (n_v - n_v0 >= min_cnt) u[k++] = ((u[i]>>32) - f[j]) << 32 | (n_v - n_v0);
+	// 	}
+	// 	if (k0 == k) n_v = n_v0; // no new chain added, reset
+	// }
 	*n_u_ = n_u = k, *_u = u; // NB: note that u[] may not be sorted by score here
 
 	// free temporary arrays
@@ -237,27 +244,27 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
 
 	// write the result to b[]
 	b = (mm128_t*)kmalloc(km, n_v * sizeof(mm128_t));
-	for (i = 0, k = 0; i < n_u; ++i) {
-		int32_t k0 = k, ni = (int32_t)u[i];
-		for (j = 0; j < ni; ++j)
-			b[k] = a[v[k0 + (ni - j - 1)]], ++k;
-	}
+	// for (i = 0, k = 0; i < n_u; ++i) {
+	// 	int32_t k0 = k, ni = (int32_t)u[i];
+	// 	for (j = 0; j < ni; ++j)
+	// 		b[k] = a[v[k0 + (ni - j - 1)]], ++k;
+	// }
 	kfree(km, v);
 
 	// sort u[] and a[] by a[].x, such that adjacent chains may be joined (required by mm_join_long)
 	w = (mm128_t*)kmalloc(km, n_u * sizeof(mm128_t));
-	for (i = k = 0; i < n_u; ++i) {
-		w[i].x = b[k].x, w[i].y = (uint64_t)k<<32|i;
-		k += (int32_t)u[i];
-	}
-	radix_sort_128x(w, w + n_u);
+	// for (i = k = 0; i < n_u; ++i) {
+	// 	w[i].x = b[k].x, w[i].y = (uint64_t)k<<32|i;
+	// 	k += (int32_t)u[i];
+	// }
+	// radix_sort_128x(w, w + n_u);
 	u2 = (uint64_t*)kmalloc(km, n_u * 8);
-	for (i = k = 0; i < n_u; ++i) {
-		int32_t j = (int32_t)w[i].y, n = (int32_t)u[j];
-		u2[i] = u[j];
-		memcpy(&a[k], &b[w[i].y>>32], n * sizeof(mm128_t));
-		k += n;
-	}
+	// for (i = k = 0; i < n_u; ++i) {
+	// 	int32_t j = (int32_t)w[i].y, n = (int32_t)u[j];
+	// 	u2[i] = u[j];
+	// 	memcpy(&a[k], &b[w[i].y>>32], n * sizeof(mm128_t));
+	// 	k += n;
+	// }
 	if (n_u) memcpy(u, u2, n_u * 8);
 	if (k) memcpy(b, a, k * sizeof(mm128_t)); // write _a_ to _b_ and deallocate _a_ because _a_ is oversized, sometimes a lot
 	kfree(km, a); kfree(km, w); kfree(km, u2);
