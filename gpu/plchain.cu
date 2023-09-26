@@ -381,21 +381,21 @@ void plchain_cal_sc_pair_density(size_t total_n, size_t num_cut, deviceMemPtr* d
     static FILE* f_sc_pair_dis = NULL;
     if (!f_sc_pair_dis){
         f_sc_pair_dis = fopen("sc_pair_dis.csv", "w+");
-        fprintf(f_sc_pair_dis, "seg_len\t");
+        fprintf(f_sc_pair_dis, "seg_len,");
         for (int i = 0; i < 500; i++){
-            fprintf(f_sc_pair_dis, "%d\t", i*10);
+            fprintf(f_sc_pair_dis, "%d,", i*10);
         }
-        fprintf(f_sc_pair_dis, "5000+\n");
+        fprintf(f_sc_pair_dis, "5000\n");
     }
     
-    fprintf(f_sc_pair_dis, "sc_pairs\t");
+    fprintf(f_sc_pair_dis, "sc_pairs,");
     for (int i = 0; i <= 500; i++){
-        fprintf(f_sc_pair_dis, "%lu\t", sc_pair_dis[i]);
+        fprintf(f_sc_pair_dis, "%lu,", sc_pair_dis[i]);
     }
     fprintf(f_sc_pair_dis, "\n");
-    fprintf(f_sc_pair_dis, "anchors\t");
+    fprintf(f_sc_pair_dis, "anchors,");
     for (int i = 0; i <= 500; i++){
-        fprintf(f_sc_pair_dis, "%lu\t", anchors_dis[i]);
+        fprintf(f_sc_pair_dis, "%lu,", anchors_dis[i]);
     }
     fprintf(f_sc_pair_dis, "\n");
     fflush(f_sc_pair_dis);
@@ -443,7 +443,7 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
     if (stream_setup.streams[stream_id].busy) {
         cudaStreamSynchronize(stream_setup.streams[stream_id].cudastream);
 
-
+#if defined(DEBUG_CHECK) || defined(DEBUG_VERBOSE)
         size_t total_n = stream_setup.streams[stream_id].host_mem.total_n;
         chain_read_t* reads = stream_setup.streams[stream_id].reads;
         deviceMemPtr* dev_mem = &stream_setup.streams[stream_id].dev_mem;
@@ -458,6 +458,7 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
         float milliseconds = 0;
         cudaEventElapsedTime(&milliseconds, stream_setup.streams[stream_id].startevent, stream_setup.streams[stream_id].cudaevent);
         fprintf(stderr, "[DEBUG] total segs: %lu, short:%lu mid: %u long: %u, last launch runtime: %f ms\n", cut_num, cut_num - num_mid_seg - num_long_seg, num_mid_seg, num_long_seg, milliseconds);
+#endif // DEBUG_CHECK
 #if defined(DEBUG_CHECK) && 0
         // check range
         int32_t* range = (int32_t*)malloc(sizeof(int32_t) * total_n);
@@ -707,9 +708,23 @@ void finish_stream_gpu(const mm_idx_t *mi, const mm_mapopt_t *opt, chain_read_t*
     chain_read_t* reads;
     int n_read;
     cudaStreamSynchronize(stream_setup.streams[t].cudastream);
-    deviceMemPtr* dev_mem = &stream_setup.streams[t].dev_mem;
-    size_t cut_num = stream_setup.streams[t].host_mem.cut_num;
-    // DEBUG: print seg numbers for each kernel
+    cudaCheck();
+
+#if defined(DEBUG_CHECK) || defined(DEBUG_VERBOSE)
+        size_t total_n = stream_setup.streams[t].host_mem.total_n;
+        deviceMemPtr* dev_mem = &stream_setup.streams[t].dev_mem;
+        size_t cut_num = stream_setup.streams[t].host_mem.cut_num;
+        // DEBUG: print seg numbers for each kernel
+
+        unsigned int num_mid_seg, num_long_seg;
+        cudaMemcpy(&num_mid_seg, dev_mem->d_mid_seg_count, sizeof(unsigned int),
+                   cudaMemcpyDeviceToHost);
+        cudaMemcpy(&num_long_seg, dev_mem->d_long_seg_count, sizeof(unsigned int),
+                   cudaMemcpyDeviceToHost);
+        float milliseconds = 0;
+        cudaEventElapsedTime(&milliseconds, stream_setup.streams[t].startevent, stream_setup.streams[t].cudaevent);
+        fprintf(stderr, "[DEBUG] total segs: %lu, short:%lu mid: %u long: %u, last launch runtime: %f ms\n", cut_num, cut_num - num_mid_seg - num_long_seg, num_mid_seg, num_long_seg, milliseconds);
+#endif // DEBUG_CHECK
 
 #if defined(DEBUG_CHECK) && 0
     unsigned int num_mid_seg, num_long_seg;
@@ -722,6 +737,10 @@ void finish_stream_gpu(const mm_idx_t *mi, const mm_mapopt_t *opt, chain_read_t*
     fprintf(stderr, "[DEBUG] total segs: %lu, short:%lu mid: %u long: %u, last launch runtime: %f ms\n", cut_num, cut_num - num_mid_seg - num_long_seg, num_mid_seg, num_long_seg, milliseconds);
 #endif // DEBUG_CHECK
     cudaCheck();
+
+#if defined(DEBUG_VERBOSE) && 1
+        plchain_cal_sc_pair_density(total_n, cut_num, dev_mem);
+#endif // DEBUG_VERBOSE
 #ifdef __CPU_LONG_SEG__
     plchain_handle_long_chain(&stream_setup.streams[t].host_mem, stream_setup.streams[t].reads, misc, km);
 #endif // __CPU_LONG_SEG__
