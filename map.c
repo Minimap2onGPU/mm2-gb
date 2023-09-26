@@ -454,11 +454,20 @@ void mm_map_frag(const mm_idx_t *mi, int n_segs, const int *qlens, const char **
 #ifdef MANUAL_PROFILING
 	double chain_start = realtime();
 #endif
+	// fprintf(stderr, "n_segs: %d, n_a: %ld\n", n_segs, n_a);
+	// for (int ii= 0; ii < 100; ++ii) {
+	// 	mm128_t *p = &a[ii+430080];
+	// 	fprintf(stderr, "a[%d]: x: %d, y: %d\n", ii, (int32_t)p->x, (int32_t)p->y);
+	// } 
+	// verified the anchors is the same as the one in long segs on GPU
+	// fake_mm_chain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score, opt->chain_gap_scale, is_splice, n_segs, 827903, a+430080, &n_regs0, &u, b->km);
+	// fprintf(stdout, "n_segs: %d, n_a: %ld\n", n_segs, n_a);
 	a = mm_chain_dp(max_chain_gap_ref, max_chain_gap_qry, opt->bw, opt->max_chain_skip, opt->max_chain_iter, opt->min_cnt, opt->min_chain_score, opt->chain_gap_scale, is_splice, n_segs, n_a, a, &n_regs0, &u, b->km);
 
 #ifdef MANUAL_PROFILING
 	chaining_time += (realtime() - chain_start);
 #endif
+
 #ifdef MANUAL_PROFILING
 	dp_chaining_time += (__rdtsc() - dp_start);
 #endif

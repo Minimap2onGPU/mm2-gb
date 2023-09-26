@@ -52,6 +52,82 @@ static inline int ilog2_32(uint32_t v)
 	return (t = v>>8) ? 8 + LogTable256[t] : LogTable256[v];
 }
 
+mm128_t *fake_mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter, int min_cnt, int min_sc, float gap_scale, int is_cdna, int n_segs, int64_t n, mm128_t *a, int *n_u_, uint64_t **_u, void *km)
+{ // TODO: make sure this works when n has more than 32 bits
+	int32_t k, *p, *t, *v, n_u, n_v;
+	uint32_t *f;
+	int64_t i, j;
+	uint64_t *u, *u2;
+	mm128_t *b, *w;
+
+	if (_u) *_u = 0, *n_u_ = 0;
+	if (n == 0 || a == 0) {
+		kfree(km, a);
+		return 0;
+	}
+	
+	f = (uint32_t*)kmalloc(km, n * 4);
+	p = (int32_t*)kmalloc(km, n * 4);
+	t = (int32_t*)kmalloc(km, n * 4);
+	v = (int32_t*)kmalloc(km, n * 4);
+	memset(t, 0, n * 4);
+	/* Allocation for debugging 
+	f_avx = (uint32_t*)kmalloc(km, n * 4);
+	p_avx = (int32_t*)kmalloc(km, n * 4);
+	*/
+	anchor_t* anchors = (anchor_t*)malloc(n* sizeof(anchor_t));
+	for (i = 0; i < n; ++i) {
+		uint64_t ri = a[i].x;
+		int32_t qi = (int32_t)a[i].y, q_span = a[i].y>>32&0xff; // NB: only 8 bits of span is used!!!
+		anchors[i].r = ri;
+		anchors[i].q = qi;
+		anchors[i].l = q_span;
+	}
+	num_bits_t *anchor_r, *anchor_q, *anchor_l;
+	create_SoA_Anchors_32_bit(anchors, n, anchor_r, anchor_q, anchor_l);
+
+	dp_chain obj(max_dist_x, max_dist_y, bw, max_skip, max_iter, gap_scale, is_cdna, n_segs);
+	obj.mm_dp_vectorized(n, &anchors[0], anchor_r, anchor_q, anchor_l, f, p, v, max_dist_x, max_dist_y, NULL, NULL);	
+
+	// -16 is due to extra padding at the start of arrays
+	anchor_r -= 16; anchor_q -= 16; anchor_l -= 16;
+	free(anchor_r); 
+	free(anchor_q); 
+	free(anchor_l);
+	free(anchors);
+
+	// find the ending positions of chains
+	memset(t, 0, n * 4);
+	for (i = 0; i < n; ++i)
+		if (p[i] >= 0) t[p[i]] = 1;
+	for (i = n_u = 0; i < n; ++i)
+		if (t[i] == 0 && v[i] >= min_sc)
+			++n_u;
+	if (n_u == 0) {
+		kfree(km, a); kfree(km, f); kfree(km, p); kfree(km, t); kfree(km, v);
+		return 0;
+	}
+	u = (uint64_t*)kmalloc(km, n_u * 8);
+	for (i = n_u = 0; i < n; ++i) {
+		if (t[i] == 0 && v[i] >= min_sc) {
+			j = i;
+			while (j >= 0 && f[j] < v[j]) j = p[j]; // find the peak that maximizes f[]
+			if (j < 0) j = i; // TODO: this should really be assert(j>=0)
+			u[n_u++] = (uint64_t)f[j] << 32 | j;
+		}
+	}
+	radix_sort_64(u, u + n_u);
+	for (i = 0; i < n_u>>1; ++i) { // reverse, s.t. the highest scoring chain is the first
+		uint64_t t = u[i];
+		u[i] = u[n_u - i - 1], u[n_u - i - 1] = t;
+	}
+
+	// free temporary arrays
+	kfree(km, f); kfree(km, p); kfree(km, t);
+	kfree(km, v); kfree(km, u);
+	
+	return a;
+}
 
 mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int max_iter, int min_cnt, int min_sc, float gap_scale, int is_cdna, int n_segs, int64_t n, mm128_t *a, int *n_u_, uint64_t **_u, void *km)
 { // TODO: make sure this works when n has more than 32 bits
@@ -66,10 +142,6 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
 		kfree(km, a);
 		return 0;
 	}
-	// FIXME: change n -> long_seg_length, a -> long segment start
-	// [DEBUG], #113, >4f452f4a-d82a-4580-981b-32d14b997217, long segment len, 827903, (129243256 - 130071159), read len, 1531639, (128813176 - 130344815), relative index, (430080 - 1257983)
-	// n = 827903;
-	// a += 430080;
 	
 	f = (uint32_t*)kmalloc(km, n * 4);
 	p = (int32_t*)kmalloc(km, n * 4);
@@ -94,6 +166,15 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
 
 	dp_chain obj(max_dist_x, max_dist_y, bw, max_skip, max_iter, gap_scale, is_cdna, n_segs);
 	// n -> long seg_lenth, 
+	// FIXME: change n -> long_seg_length, a -> long segment start
+	// [DEBUG], #113, >4f452f4a-d82a-4580-981b-32d14b997217, long segment len, 827903, (129243256 - 130071159), read len, 1531639, (128813176 - 130344815), relative index, (430080 - 1257983)
+	// n = 827903;
+	// a += 430080;
+	// if (n == 1531639) {
+	// 	fprintf(stderr, "n: %ld\n", n);
+	// 	obj.mm_dp_vectorized(827903, &anchors[430080], anchor_r+430080, anchor_q+430080, anchor_l+430080, f, p, v, max_dist_x, max_dist_y, NULL, NULL);	
+	// 	exit(0);
+	// }
 	obj.mm_dp_vectorized(n, &anchors[0], anchor_r, anchor_q, anchor_l, f, p, v, max_dist_x, max_dist_y, NULL, NULL);	
 
 	// -16 is due to extra padding at the start of arrays
@@ -270,3 +351,5 @@ mm128_t *mm_chain_dp(int max_dist_x, int max_dist_y, int bw, int max_skip, int m
 	kfree(km, a); kfree(km, w); kfree(km, u2);
 	return b;
 }
+
+
