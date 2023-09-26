@@ -17,15 +17,15 @@ INCLUDES		+= -I gpu
 ############  	CUDA Compile 	###################
 ###################################################
 NVCC 			= nvcc
-CUDAFLAGS		= -rdc=true -DNDEBUG -lineinfo ## turn off assert 
-CUDATESTFLAG	= -G -DDEBUG_CHECK -DDEBUG_VERBOSE
+CUDAFLAGS		= -rdc=true -lineinfo
+CUDATESTFLAG	= -G -DDEBUG_PRINT
 
 ###################################################
 ############	HIP Compile		###################
 ###################################################
 HIPCC			= hipcc
-HIPFLAGS		= -DUSEHIP -DNDEBUG -Rpass-analysis=kernel-resource-usage ## turn off assert  
-HIPTESTFLAGS	= -g  -DDEBUG_VERBOSE #-DDEBUG_CHECK
+HIPFLAGS		= -DUSEHIP -Rpass-analysis=kernel-resource-usage
+HIPTESTFLAGS	= -g -DDEBUG_PRINT
 
 ###################################################
 ############	DEBUG Options	###################
@@ -40,20 +40,14 @@ else
 	GPU_TESTFL	= $(CUDATESTFLAG)
 endif
 
-ifeq ($(PRINT_DEBUG), 1)
+ifneq ($(DEBUG),)
 	GPU_FLAGS	+= $(GPU_TESTFL)
 endif
 
-# check: CFLAGS += -DDEBUG_CHECK
-# check: HIPFLAGS += -DDEBUG_CHECK
-# check: CUDAFLAGS += -DDEBUG_CHECK
-# check: HIPFLAGS += $(HIPTESTFLAGS)
-# check: CUDAFLAGS += $(CUDATESTFLAG)
-
-# verbose: CFLAGS += -DDEBUG_VERBOSE
-# verbose: HIPFLAGS += -DDEBUG_VERBOSE
-# verbose: CUDAFLAGS += -DDEBUG_VERBOSE
-
+ifneq ($(DEBUG_ANALYSIS),)
+	GPU_FLAGS	+= $(GPU_TESTFL)
+	GPU_FLAGS	+= -DDEBUG_CHECK -DDEBUG_VERBOSE
+endif 
 
 
 %.o: %.cu

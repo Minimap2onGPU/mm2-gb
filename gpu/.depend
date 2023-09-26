@@ -2,14 +2,14 @@
 # __CLANG_OFFLOAD_BUNDLE____START__ hip-amdgcn-amd-amdhsa-gfx1030
 plchain.o: gpu/plchain.cu mmpriv.h minimap.h bseq.h kseq.h gpu/plmem.cuh \
   gpu/hipify.cuh gpu/plchain.h gpu/plutils.h kalloc.h gpu/plrange.cuh \
-  gpu/plscore.cuh
+  gpu/plscore.cuh gpu/debug.h
 
 # __CLANG_OFFLOAD_BUNDLE____END__ hip-amdgcn-amd-amdhsa-gfx1030
 
 # __CLANG_OFFLOAD_BUNDLE____START__ host-x86_64-unknown-linux-gnu
 plchain.o: gpu/plchain.cu mmpriv.h minimap.h bseq.h kseq.h gpu/plmem.cuh \
   gpu/hipify.cuh gpu/plchain.h gpu/plutils.h kalloc.h gpu/plrange.cuh \
-  gpu/plscore.cuh
+  gpu/plscore.cuh gpu/debug.h
 
 # __CLANG_OFFLOAD_BUNDLE____END__ host-x86_64-unknown-linux-gnu
 
