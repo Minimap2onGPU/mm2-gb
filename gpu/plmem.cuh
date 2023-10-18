@@ -72,6 +72,13 @@ typedef struct {
     seg_t *d_long_seg;
     unsigned int *d_mid_seg_count;
     seg_t *d_mid_seg;
+
+    // long segement buffer
+    int32_t *d_ax_long, *d_ay_long;
+    int8_t *d_sid_long;
+    size_t *d_total_n_long;
+    int32_t *d_range_long;
+    size_t buffer_size_long;
 } deviceMemPtr;
 
 typedef struct stream_ptr_t{

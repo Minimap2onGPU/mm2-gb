@@ -56,6 +56,13 @@ void plmem_malloc_device_mem(deviceMemPtr *dev_mem, size_t anchor_per_batch, int
     cudaMalloc(&dev_mem->d_long_seg, num_cut/(MM_LONG_SEG_CUTOFF + 1) * sizeof(seg_t));
     cudaMalloc(&dev_mem->d_mid_seg_count, sizeof(unsigned int));
     cudaMalloc(&dev_mem->d_mid_seg, num_cut/(MM_MID_SEG_CUTOFF + 1) * sizeof(seg_t));
+
+    // long seg buffer
+    cudaMalloc(&dev_mem->d_ax_long, dev_mem->buffer_size_long * sizeof(int32_t));
+    cudaMalloc(&dev_mem->d_ay_long, dev_mem->buffer_size_long  * sizeof(int32_t));
+    cudaMalloc(&dev_mem->d_sid_long, dev_mem->buffer_size_long  * sizeof(int8_t));
+    cudaMalloc(&dev_mem->d_range_long, dev_mem->buffer_size_long * sizeof(int32_t));
+    cudaMalloc(&dev_mem->d_total_n_long, sizeof(size_t));
     cudaCheck();
 }
 
@@ -77,6 +84,12 @@ void plmem_free_device_mem(deviceMemPtr *dev_mem) {
     cudaFree(dev_mem->d_long_seg_count);
     cudaFree(dev_mem->d_mid_seg);
     cudaFree(dev_mem->d_mid_seg_count);
+
+    cudaFree(dev_mem->d_ax_long);
+    cudaFree(dev_mem->d_ay_long);
+    cudaFree(dev_mem->d_sid_long);
+    cudaFree(dev_mem->d_range_long);
+    cudaFree(dev_mem->d_total_n_long);
     cudaCheck();
 }
 
@@ -314,7 +327,7 @@ void plmem_config_stream(size_t *max_range_grid_, size_t *max_num_cut_, size_t m
 template <bool is_blooking = false>
 void plmem_config_batch(cJSON *json, int *num_stream_,
                          int *min_n_, size_t *max_total_n_,
-                         int *max_read_) {
+                         int *max_read_, size_t *long_seg_buffer_size_) {
     if (is_blooking) 
         *num_stream_ = 16;
     else
@@ -326,9 +339,11 @@ void plmem_config_batch(cJSON *json, int *num_stream_,
     /* If Use define max_total_n & max_read */
     cJSON *max_total_n_json = cJSON_GetObjectItem(json, "max_total_n");
     cJSON *max_read_json = cJSON_GetObjectItem(json, "max_read");
+    cJSON *long_seg_buffer_size_json = cJSON_GetObjectItem(json, "long_seg_buffer_size");
     if (max_total_n_json && max_read_json){
         *max_total_n_ = max_total_n_json->valueint;
         *max_read_ = max_read_json->valueint;
+        *long_seg_buffer_size_ = long_seg_buffer_size_json->valueint;
         return;
     }
 
@@ -386,8 +401,9 @@ void plmem_initialize(size_t *max_total_n_, int *max_read_,
     cJSON *json = plmem_parse_gpu_config("gpu_config.json");
     plmem_config_kernels(json);
     int num_streams;
-    plmem_config_batch<true>(json, &num_streams, min_anchors_,
-                              max_total_n_, max_read_);
+    size_t buffer_size_long;
+    plmem_config_batch<true>(json, &num_streams, min_anchors_, max_total_n_,
+                             max_read_, &buffer_size_long);
 }
 
 // initialize global variable stream_setup
@@ -395,7 +411,7 @@ void plmem_stream_initialize(size_t *max_total_n_,
                              int *max_read_, int *min_anchors_) {
 
     int num_stream;
-    size_t max_anchors_stream, max_range_grid, max_num_cut;
+    size_t max_anchors_stream, max_range_grid, max_num_cut, long_seg_buffer_size;
 #ifndef GPU_CONFIG
     cJSON *json = plmem_parse_gpu_config("gpu_config.json");
 #else 
@@ -403,7 +419,7 @@ void plmem_stream_initialize(size_t *max_total_n_,
 #endif
     plmem_config_kernels(json);
     plmem_config_batch<false>(json, &num_stream, min_anchors_, &max_anchors_stream,
-                              max_read_);
+                              max_read_, &long_seg_buffer_size);
     plmem_config_stream(&max_range_grid, &max_num_cut, max_anchors_stream,
                         *max_read_, *min_anchors_);
 
@@ -412,9 +428,11 @@ void plmem_stream_initialize(size_t *max_total_n_,
 
     stream_setup.streams = new stream_ptr_t[num_stream];
 #ifdef DEBUG_PRINT
-    fprintf(
-        stderr,
-        "[Info] max anchors per stream: %zu, max range grid %zu max_num_cut %zu\n", max_anchors_stream, max_range_grid, max_num_cut);
+    fprintf(stderr,
+            "[Info] max anchors per stream: %zu, max range grid %zu "
+            "max_num_cut %zu long_seg_buffer_size %zu\n",
+            max_anchors_stream, max_range_grid, max_num_cut,
+            long_seg_buffer_size);
 #endif  // DEBUG_PRINT
 
     for (int i = 0; i < num_stream; i++) {
@@ -423,6 +441,7 @@ void plmem_stream_initialize(size_t *max_total_n_,
         cudaEventCreate(&stream_setup.streams[i].cudaevent);
         cudaEventCreate(&stream_setup.streams[i].startevent);
         cudaCheck();
+        stream_setup.streams[i].dev_mem.buffer_size_long = long_seg_buffer_size;
         plmem_malloc_host_mem(&stream_setup.streams[i].host_mem, max_anchors_stream,
                               max_range_grid);
         plmem_malloc_device_mem(&stream_setup.streams[i].dev_mem, max_anchors_stream,

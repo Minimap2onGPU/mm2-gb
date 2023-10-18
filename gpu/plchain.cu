@@ -199,6 +199,9 @@ void plchain_cal_score_launch(chain_read_t **reads_, int *n_read_, Misc misc, st
     /* stream scheduler */
     int stream_id = plchain_schedule_stream(stream_setup, batchid);
     if (stream_setup.streams[stream_id].busy) {
+#ifdef DEBUG_PRINT
+    fprintf(stderr, "[Info] %s (%s:%d) stream %d sync, total_n %lu\n", __func__, __FILE__, __LINE__, stream_id, stream_setup.streams[stream_id].host_mem.total_n);
+#endif // DEBUG_PRINT 
         // cleanup previous batch in the stream
         plchain_backtracking(&stream_setup.streams[stream_id].host_mem,
                              stream_setup.streams[stream_id].reads, misc, km);
