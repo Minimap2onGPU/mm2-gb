@@ -8,7 +8,7 @@
 #include <time.h>
 
 void plmem_malloc_host_mem(hostMemPtr *host_mem, size_t anchor_per_batch,
-                           int range_grid_size) {
+                           int range_grid_size, size_t buffer_size_long) {
     // data array
     cudaMallocHost((void**)&host_mem->ax, anchor_per_batch * sizeof(int32_t));
     cudaMallocHost((void**)&host_mem->ay, anchor_per_batch * sizeof(int32_t));
@@ -21,6 +21,9 @@ void plmem_malloc_host_mem(hostMemPtr *host_mem, size_t anchor_per_batch,
     cudaMallocHost((void**)&host_mem->start_idx, range_grid_size * sizeof(size_t));
     cudaMallocHost((void**)&host_mem->read_end_idx, range_grid_size * sizeof(size_t));
     cudaMallocHost((void**)&host_mem->cut_start_idx, range_grid_size * sizeof(size_t));
+    cudaMallocHost((void**)&host_mem->long_segs, buffer_size_long / (MM_LONG_SEG_CUTOFF * MM_CUT_SIZE) * sizeof(seg_t));
+    cudaMallocHost((void**)&host_mem->f_long, buffer_size_long * sizeof(int32_t));
+    cudaMallocHost((void**)&host_mem->p_long, buffer_size_long * sizeof(uint16_t));
     cudaCheck();
 }
 
@@ -53,7 +56,8 @@ void plmem_malloc_device_mem(deviceMemPtr *dev_mem, size_t anchor_per_batch, int
     // cut
     cudaMalloc(&dev_mem->d_cut, num_cut * sizeof(size_t));
     cudaMalloc(&dev_mem->d_long_seg_count, sizeof(unsigned int));
-    cudaMalloc(&dev_mem->d_long_seg, num_cut/(MM_LONG_SEG_CUTOFF + 1) * sizeof(seg_t));
+    cudaMalloc(&dev_mem->d_long_seg, dev_mem->buffer_size_long / (MM_LONG_SEG_CUTOFF * MM_CUT_SIZE) * sizeof(seg_t));
+    cudaMalloc(&dev_mem->d_long_seg_og, dev_mem->buffer_size_long / (MM_LONG_SEG_CUTOFF * MM_CUT_SIZE) * sizeof(seg_t));
     cudaMalloc(&dev_mem->d_mid_seg_count, sizeof(unsigned int));
     cudaMalloc(&dev_mem->d_mid_seg, num_cut/(MM_MID_SEG_CUTOFF + 1) * sizeof(seg_t));
 
@@ -63,6 +67,8 @@ void plmem_malloc_device_mem(deviceMemPtr *dev_mem, size_t anchor_per_batch, int
     cudaMalloc(&dev_mem->d_sid_long, dev_mem->buffer_size_long  * sizeof(int8_t));
     cudaMalloc(&dev_mem->d_range_long, dev_mem->buffer_size_long * sizeof(int32_t));
     cudaMalloc(&dev_mem->d_total_n_long, sizeof(size_t));
+    cudaMalloc(&dev_mem->d_f_long, sizeof(int32_t) * dev_mem->buffer_size_long);
+    cudaMalloc(&dev_mem->d_p_long, sizeof(uint16_t) * dev_mem->buffer_size_long);
     cudaCheck();
 }
 
@@ -218,6 +224,15 @@ void plmem_async_d2h_memcpy(stream_ptr_t *stream_ptrs) {
                     *stream);
     cudaMemcpyAsync(host_mem->p, dev_mem->d_p,
                     sizeof(uint16_t) * host_mem->total_n,
+                    cudaMemcpyDeviceToHost, *stream);
+    cudaMemcpyAsync(host_mem->long_segs, dev_mem->d_long_seg_og,
+                    dev_mem->buffer_size_long / (MM_LONG_SEG_CUTOFF * MM_CUT_SIZE) * sizeof(seg_t),
+                    cudaMemcpyDeviceToHost, *stream);
+    cudaMemcpyAsync(&host_mem->long_segs_num, dev_mem->d_long_seg_count,
+                    sizeof(unsigned int), cudaMemcpyDeviceToHost, *stream);
+    cudaMemcpyAsync(host_mem->f_long, dev_mem->d_f_long, sizeof(int32_t)*dev_mem->buffer_size_long,
+                    cudaMemcpyDeviceToHost, *stream);
+    cudaMemcpyAsync(host_mem->p_long, dev_mem->d_p_long, sizeof(uint16_t)*dev_mem->buffer_size_long,
                     cudaMemcpyDeviceToHost, *stream);
     cudaCheck();
 }
@@ -443,7 +458,7 @@ void plmem_stream_initialize(size_t *max_total_n_,
         cudaCheck();
         stream_setup.streams[i].dev_mem.buffer_size_long = long_seg_buffer_size;
         plmem_malloc_host_mem(&stream_setup.streams[i].host_mem, max_anchors_stream,
-                              max_range_grid);
+                              max_range_grid, long_seg_buffer_size);
         plmem_malloc_device_mem(&stream_setup.streams[i].dev_mem, max_anchors_stream,
                                 max_range_grid, max_num_cut);
     }
