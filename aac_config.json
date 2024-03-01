@@ -17,8 +17,8 @@
     },
     "score_kernel": {
         "short_blockdim": 64,
-        "long_blockdim": 64,
-        "mid_blockdim": 64,
+        "long_blockdim": 1024,
+        "mid_blockdim": 512,
         "//blockdim config": "options are not used: static config specified at compile time (make ... LONG_BLOCK_SIZE=1024)",
         "short_griddim": 16128,
         "long_griddim": 208,
