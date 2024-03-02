@@ -104,6 +104,8 @@ void plchain_backtracking(hostMemPtr *host_mem, chain_read_t *reads, Misc misc, 
 
     uint16_t* p_hostmem = host_mem->p;
     int32_t* f = host_mem->f;
+    // FIXME: DISABLED BACKTRACK, REMOVE THE RETURN HERE
+    return;
     for (int i = 0; i < n_read; i++) {
         int64_t* p;
         KMALLOC(km, p, reads[i].n);
@@ -699,7 +701,6 @@ int plchain_finish_batch(streamSetup_t stream_setup, int stream_id, Misc misc, v
     return n_reads;
 } 
 
-#define NAIVE
 #ifndef NAIVE
 void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, streamSetup_t stream_setup, int thread_id, void* km){
     chain_read_t* reads = *reads_;
@@ -898,26 +899,6 @@ void plchain_cal_score_async(chain_read_t **reads_, int *n_read_, Misc misc, str
 
     cudaEventRecord(stream_setup.streams[stream_id].startevent,
                     stream_setup.streams[stream_id].cudastream);
-    // size_t total_n = 0;
-    // for (int i = 0; i < n_read; i++) {
-    //     total_n += reads[i].n;
-    // } // compute total_n first
-
-    // // reset long seg counters
-    // cudaMemsetAsync(stream_setup.streams[stream_id].dev_mem.d_long_seg_count, 0, sizeof(unsigned int),
-    //                 stream_setup.streams[stream_id].cudastream);
-    // cudaMemsetAsync(stream_setup.streams[stream_id].dev_mem.d_total_n_long, 0, sizeof(size_t),
-    //                 stream_setup.streams[stream_id].cudastream);
-    // stream_setup.streams[stream_id].long_mem.total_long_segs_num[0] = 0;
-    // stream_setup.streams[stream_id].long_mem.total_long_segs_n[0] = 0;
-    // for(int uid = 0; uid < MICRO_BATCH; uid++) {
-    //     stream_setup.streams[stream_id].host_mems[uid].long_segs_num[0] = 0;
-    //     stream_setup.streams[stream_id].host_mems[uid].index;
-    //     stream_setup.streams[stream_id].host_mems[uid].griddim = 0;
-    //     stream_setup.streams[stream_id].host_mems[uid].size = 0;
-    //     stream_setup.streams[stream_id].host_mems[uid].total_n = 0;
-    //     stream_setup.streams[stream_id].host_mems[uid].cut_num = 0;
-    // }
 
     stream_setup.streams[stream_id].reads = reads;
     stream_setup.streams[stream_id].n_read = n_read;

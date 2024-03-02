@@ -89,11 +89,13 @@ void plmem_malloc_device_mem(deviceMemPtr *dev_mem, size_t anchor_per_batch, int
     cudaMalloc(&dev_mem->d_range, anchor_per_batch * sizeof(int32_t));
     cudaMalloc(&dev_mem->d_f, anchor_per_batch * sizeof(int32_t));
     cudaMalloc(&dev_mem->d_p, anchor_per_batch * sizeof(uint16_t));
+    cudaCheck();
 
     //index
     cudaMalloc(&dev_mem->d_start_idx, range_grid_size * sizeof(size_t));
     cudaMalloc(&dev_mem->d_read_end_idx, range_grid_size * sizeof(size_t));
     cudaMalloc(&dev_mem->d_cut_start_idx, range_grid_size * sizeof(size_t));
+    cudaCheck();
 
     // cut
     cudaMalloc(&dev_mem->d_cut, num_cut * sizeof(size_t));
@@ -102,6 +104,7 @@ void plmem_malloc_device_mem(deviceMemPtr *dev_mem, size_t anchor_per_batch, int
     cudaMalloc(&dev_mem->d_long_seg_og, dev_mem->buffer_size_long / (MM_LONG_SEG_CUTOFF * MM_CUT_SIZE) * sizeof(seg_t));
     cudaMalloc(&dev_mem->d_mid_seg_count, sizeof(unsigned int));
     cudaMalloc(&dev_mem->d_mid_seg, num_cut/(MM_MID_SEG_CUTOFF + 1) * sizeof(seg_t));
+    cudaCheck();
 
     size_t gpu_free_mem, gpu_total_mem;
     cudaMemGetInfo(&gpu_free_mem, &gpu_total_mem);
@@ -248,28 +251,37 @@ void plmem_async_h2d_memcpy(stream_ptr_t* stream_ptrs) {
     cudaMemcpyAsync(dev_mem->d_ax, host_mem->ax,
                     sizeof(int32_t) * host_mem->total_n, cudaMemcpyHostToDevice,
                     *stream);
+    cudaCheck();
     cudaMemcpyAsync(dev_mem->d_ay, host_mem->ay,
                     sizeof(int32_t) * host_mem->total_n, cudaMemcpyHostToDevice,
                     *stream);
+    cudaCheck();
     cudaMemcpyAsync(dev_mem->d_sid, host_mem->sid,
                     sizeof(int8_t) * host_mem->total_n, cudaMemcpyHostToDevice,
                     *stream);
+    cudaCheck();
     cudaMemcpyAsync(dev_mem->d_xrev, host_mem->xrev,
                     sizeof(int32_t) * host_mem->total_n, cudaMemcpyHostToDevice,
                     *stream);
+    cudaCheck();
     cudaMemcpyAsync(dev_mem->d_start_idx, host_mem->start_idx,
                     sizeof(size_t) * host_mem->griddim, cudaMemcpyHostToDevice,
                     *stream);
+    cudaCheck();
     cudaMemcpyAsync(dev_mem->d_read_end_idx, host_mem->read_end_idx,
                     sizeof(size_t) * host_mem->griddim, cudaMemcpyHostToDevice,
                     *stream);
+    cudaCheck();
     cudaMemcpyAsync(dev_mem->d_cut_start_idx, host_mem->cut_start_idx,
                     sizeof(size_t) * host_mem->griddim, cudaMemcpyHostToDevice,
                     *stream);
+    cudaCheck();
     cudaMemsetAsync(dev_mem->d_cut, 0xff,
                     sizeof(size_t) * host_mem->cut_num, *stream);
+    cudaCheck();
     cudaMemsetAsync(dev_mem->d_f, 0, sizeof(int32_t) * host_mem->total_n,
                     *stream);
+    cudaCheck();
     cudaMemsetAsync(dev_mem->d_p, 0, sizeof(uint16_t) * host_mem->total_n,
                     *stream);
     cudaCheck();

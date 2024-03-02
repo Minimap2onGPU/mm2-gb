@@ -8,6 +8,10 @@
 #define MICRO_BATCH 1
 #endif // MICRO_BATCH
 
+#ifndef NAIVE
+#define NAIVE
+#endif // MICRO_BATCH
+
 typedef struct {
     int index;       // read index / batch index
     int griddim;     // grid for range selection kernel. 
