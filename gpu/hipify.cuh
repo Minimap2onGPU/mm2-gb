@@ -3,6 +3,7 @@
 
 #ifdef USEHIP
 #include "hip/hip_runtime.h"
+#include "roctracer/roctx.h"
 #define     cudaDeviceProp                  hipDeviceProp_t
 #define     cudaGetDeviceProperties         hipGetDeviceProperties
 #define     cudaMalloc                      hipMalloc
@@ -29,6 +30,9 @@
 #define     cudaEventRecord                 hipEventRecord
 #define     cudaEventQuery                  hipEventQuery
 #define     cudaEventDestroy                hipEventDestroy
+#define     cudaEventElapsedTime            hipEventElapsedTime
+#define     cudaStreamWaitEvent             hipStreamWaitEvent
+#define     cudaMemGetInfo                  hipMemGetInfo
 #define cudaCheck() {                                                       \
     hipError_t err = hipGetLastError();                                     \
     if (hipSuccess != err) {                                                \
@@ -38,6 +42,7 @@
         exit(EXIT_FAILURE);                                                 \
     }                                                                       \
 }
+#define     cudaWarpSize                    64
 #else
 #define cudaCheck() {                                                   \
     cudaError_t err = cudaGetLastError();                               \
