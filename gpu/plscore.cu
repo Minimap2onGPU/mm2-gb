@@ -274,7 +274,12 @@ __global__ void score_generation_short(
                                 ,seg_t *mid_seg, unsigned int *mid_seg_count){
     int tid = threadIdx.x;
     int bid = blockIdx.x;
-    // init f and p
+
+    size_t long_seg_start_idx;
+#ifndef USEHIP
+    __shared__ size_t long_seg_start_idx_shared;
+#endif
+
     for(int segid = bid; segid < seg_count; segid += gridDim.x){
         size_t start_idx = seg_start_arr[segid];
         if (start_idx == SIZE_MAX) continue; // start at a failed cut: continue to next iteration
@@ -292,11 +297,11 @@ __global__ void score_generation_short(
             ++end_segid;
         }
         if (end_segid > segid + long_seg_cutoff) {
-            size_t long_seg_start_idx;
             if (tid == 0) {
                 /* Allocate space in long seg buffer */
                 long_seg_start_idx = atomicAdd((unsigned long long int*)total_n_long, (unsigned long long int)end_idx - start_idx);
                 if (long_seg_start_idx + (end_idx - start_idx) >= buffer_size_long){ // long segement buffer is full
+                printf("bid %d long seg buffer is full\n", bid);
                 /* rollback total_n_long */
                 // DEBUG: 
                 printf("bid %d Subtracting %lu from total_n_long %lu\n", bid, end_idx - start_idx, *total_n_long);
@@ -329,8 +334,12 @@ __global__ void score_generation_short(
             // broadcast long_seg_start_idx to all scalar registers
 #ifdef USEHIP
             long_seg_start_idx = __builtin_amdgcn_readfirstlane(long_seg_start_idx);
-#else
-            long_seg_start_idx = __shfl_sync(0xffffffff, long_seg_start_idx, 0);
+#else       
+            if (tid == 0) long_seg_start_idx_shared = long_seg_start_idx;
+            __syncwarp(); // sync all threads in the warp
+            long_seg_start_idx = long_seg_start_idx_shared;
+            // long_seg_start_idx = __shfl_sync(0xffffffff, long_seg_start_idx,
+            // 0);
 #endif
             if (long_seg_start_idx == SIZE_MAX)
                 continue;  // failed to allocate long_seg buffer

@@ -96,7 +96,7 @@ void plmem_malloc_device_mem(deviceMemPtr *dev_mem, size_t anchor_per_batch, int
     cudaMalloc(&dev_mem->d_long_seg, dev_mem->buffer_size_long / (score_kernel_config.long_seg_cutoff * score_kernel_config.cut_unit) * sizeof(seg_t));
     cudaMalloc(&dev_mem->d_long_seg_og, dev_mem->buffer_size_long / (score_kernel_config.long_seg_cutoff * score_kernel_config.cut_unit) * sizeof(seg_t));
     cudaMalloc(&dev_mem->d_mid_seg_count, sizeof(unsigned int));
-    cudaMalloc(&dev_mem->d_mid_seg, num_cut/(score_kernel_config.mid_seg_cutoff + 1) * sizeof(seg_t));
+    cudaMalloc(&dev_mem->d_mid_seg, num_cut/(score_kernel_config.mid_seg_cutoff) * sizeof(seg_t));
 
     size_t gpu_free_mem, gpu_total_mem;
     cudaMemGetInfo(&gpu_free_mem, &gpu_total_mem);
