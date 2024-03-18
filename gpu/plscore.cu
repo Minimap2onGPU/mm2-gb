@@ -106,7 +106,7 @@ inline __device__ void compute_sc_seg_one_wf(int32_t* anchors_x, int32_t* anchor
             }
         }
 #ifndef USEHIP
-        __syncwarps(); // NOTE: single warp, no need to sync
+        __syncwarp(); // NOTE: single warp, no need to sync
 #endif // USEHIP
     }
     
@@ -297,7 +297,17 @@ __global__ void score_generation_short(
                 /* Allocate space in long seg buffer */
                 long_seg_start_idx = atomicAdd((unsigned long long int*)total_n_long, (unsigned long long int)end_idx - start_idx);
                 if (long_seg_start_idx + (end_idx - start_idx) >= buffer_size_long){ // long segement buffer is full
-                    atomicSub((unsigned long long int*)total_n_long, (unsigned long long int)end_idx - start_idx); // rollback total_n_long
+                /* rollback total_n_long */
+                // DEBUG: 
+                printf("bid %d Subtracting %lu from total_n_long %lu\n", bid, end_idx - start_idx, *total_n_long);
+#ifdef USEHIP
+                    atomicSub((unsigned long long int*)total_n_long, (unsigned long long int)end_idx - start_idx);
+#else // CUDA. CUDA does not support atomicSub for unsigned long long int. 
+                    atomicAdd((unsigned long long int*)total_n_long, (unsigned long long int)(start_idx - end_idx)); 
+
+#endif // USEHIP
+                // DEBUG: 
+                printf("bid %d after Subtracting %lu from total_n_long %lu\n", bid, end_idx - start_idx, *total_n_long);
                     long_seg_start_idx = SIZE_MAX;
                     // fallback to mid kernel
                     int mid_seg_idx = atomicAdd((unsigned long long int*)mid_seg_count, 1);
