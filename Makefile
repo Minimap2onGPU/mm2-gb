@@ -1,12 +1,14 @@
-CFLAGS=		-g -O2 #-Wextra -Wall -Wc++-compat
+CFLAGS=		 -O2 -g -DNDEBUG
+CDEBUG_FLAGS= -g -O2 #-Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -Wno-sign-compare -Wno-unused-function -Wno-c++17-extensions -Wno-\#warnings #-O0 -DNDEBUG
 CPPFLAGS=	-DHAVE_KALLOC -D__AMD_SPLIT_KERNELS__ # -Wno-unused-but-set-variable -Wno-unused-variable
+CPPFLAGS+= 	$(if $(MAX_MICRO_BATCH),-DMAX_MICRO_BATCH=\($(MAX_MICRO_BATCH)\))
 INCLUDES=	-I .
 OBJS=		kthread.o kalloc.o misc.o bseq.o sketch.o sdust.o options.o index.o \
 			lchain.o align.o hit.o seed.o map.o format.o pe.o esterr.o splitidx.o \
 			ksw2_ll_sse.o
 PROG=		minimap2
 PROG_EXTRA=	sdust minimap2-lite
-LIBS=		-lm -lz -lpthread
+LIBS=		-lm -lz -lpthread 
 
 ifeq ($(arm_neon),) # if arm_neon is not defined
 ifeq ($(sse2only),) # if sse2only is not defined
@@ -34,6 +36,20 @@ ifneq ($(tsan),)
 	LIBS+=-fsanitize=thread
 endif
 
+
+# turn on debug flags 
+ifeq ($(DEBUG),info) 
+	CFLAGS += -DDEBUG_PRINT
+endif
+ifeq ($(DEBUG), analyze) 
+	CFLAGS += $(CDEBUG_FLAGS) 
+	CFLAGS += -DDEBUG_CHECK -DDEBUG_PRINT
+endif
+ifeq ($(DEBUG), verbose)
+	CFLAGS += $(CDEBUG_FLAGS) 
+	CFLAGS += -DDEBUG_CHECK -DDEBUG_PRINT -DDEBUG_VERBOSE
+endif
+
 .PHONY:all extra clean depend # profile
 .SUFFIXES:.c .o
 
@@ -56,10 +72,10 @@ include gpu/gpu.mk
 
 # compile with nvcc/hipcc
 minimap2:main.o libminimap2.a
-		$(GPU_CC) $(CFLAGS) main.o -o $@ -L. -lminimap2 $(LIBS)
+		$(GPU_CC) $(CFLAGS) $(GPU_FLAGS) main.o -o $@ -L. -lminimap2 $(LIBS)
 
 minimap2-lite:example.o libminimap2.a
-		$(GPU_CC) $(CFLAGS) $< -o $@ -L. -lminimap2 $(LIBS)
+		$(GPU_CC) $(CFLAGS)  $(GPU_FLAGS) $< -o $@ -L. -lminimap2 $(LIBS)
 
 libminimap2.a:$(OBJS) $(CU_OBJS) $(CJSON_OBJ)
 		$(AR) -csru $@ $^

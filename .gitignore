@@ -14,5 +14,9 @@ Log/**
 debug/**
 verf
 trace
-*.sh
 ncu
+nsys
+*_output*
+workloads
+.cmake/**
+.depend

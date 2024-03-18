@@ -17,11 +17,11 @@ __constant__ int d_max_dist_x;
 __constant__ int d_max_iter;
 __constant__ int d_cut_check_anchors;
 
-inline __device__ int64_t range_binary_search(const int64_t* ax, int64_t i, int64_t st_end){
+inline __device__ int64_t range_binary_search(const int32_t* ax, const int32_t* rev, int64_t i, int64_t st_end){
     int64_t st_high = st_end, st_low=i;
     while (st_high != st_low) {
         int64_t mid = (st_high + st_low -1) / 2+1;
-        if (ax[i] >> 32 != ax[mid] >> 32 || ax[mid] > ax[i] + d_max_dist_x) {
+        if (rev[i] != rev[mid] || ax[mid] > ax[i] + d_max_dist_x) {
             st_high = mid -1;
         } else {
             st_low = mid;
@@ -35,7 +35,7 @@ inline __device__ int64_t range_binary_search(const int64_t* ax, int64_t i, int6
  * Forward Range Selection Kernel using global memory and binary range search. 
  * cut reads into segements where successor range = 0. 
 */
-__global__ void range_selection_kernel_binary(const int64_t* ax, size_t *start_idx_arr, size_t *read_end_idx_arr, 
+__global__ void range_selection_kernel_binary(const int32_t* ax, const int32_t* rev, size_t *start_idx_arr, size_t *read_end_idx_arr, 
     int32_t *range, size_t* cut, size_t* cut_start_idx, size_t total_n, range_kernel_config_t config){
     int tid = threadIdx.x;
     int bid = blockIdx.x;
@@ -60,11 +60,11 @@ __global__ void range_selection_kernel_binary(const int64_t* ax, size_t *start_i
             st = st <= st_max ? st : st_max;
             assert(st < total_n);
             assert(i < total_n);
-            if (st > i && (ax[i] >> 32 != ax[st] >> 32 || ax[st] > ax[i] + d_max_dist_x)){
+            if (st > i && (rev[st] != rev[i] || ax[st] > ax[i] + d_max_dist_x)){
                 break;
             }
         }
-        st = range_binary_search(ax, i, st);
+        st = range_binary_search(ax, rev, i, st);
         range[i] = st - i;
 
         if (tid >= blockDim.x - d_cut_check_anchors &&
@@ -79,7 +79,7 @@ __global__ void range_selection_kernel_binary(const int64_t* ax, size_t *start_i
  * Forward Range Selection Kernel using global memory and linear range search.
  * cut reads into segements where successor range = 0.
  */
-__global__ void range_selection_kernel_naive(const int64_t* ax, size_t *start_idx_arr, size_t *read_end_idx_arr, 
+__global__ void range_selection_kernel_naive(const int32_t* ax, const int32_t* rev, size_t *start_idx_arr, size_t *read_end_idx_arr, 
     int32_t *range, size_t* cut, size_t* cut_start_idx, size_t total_n, range_kernel_config_t config){
     int tid = threadIdx.x;
     int bid = blockIdx.x;
@@ -109,7 +109,7 @@ __global__ void range_selection_kernel_naive(const int64_t* ax, size_t *start_id
         assert(st < total_n);
         assert(i < total_n);
         while (st > i && 
-                (ax[i] >> 32 != ax[st] >> 32  // NOTE: different prefix cannot become predecessor 
+                (rev[i] != rev[st] // NOTE: different prefix cannot become predecessor 
                 || ax[st] > ax[i] + d_max_dist_x)) { // NOTE: same prefix compare the value
             --st;
         }
@@ -229,11 +229,13 @@ void plrange_upload_misc(Misc misc){
     hipMemcpyToSymbol(HIP_SYMBOL(d_cut_check_anchors),
                       &range_kernel_config.cut_check_anchors, sizeof(int));
 #else
+    cudaCheck();
     cudaMemcpyToSymbol(d_max_dist_x, &misc.max_dist_x, sizeof(int));
     cudaMemcpyToSymbol(d_max_iter, &misc.max_iter, sizeof(int));
     cudaMemcpyToSymbol(d_cut_check_anchors,
                        &range_kernel_config.cut_check_anchors, sizeof(int));
 #endif  // USEHIP
+    cudaCheck();
 }
 
 void plrange_async_range_selection(deviceMemPtr* dev_mem, cudaStream_t* stream) {
@@ -242,26 +244,17 @@ void plrange_async_range_selection(deviceMemPtr* dev_mem, cudaStream_t* stream) 
     dim3 DimBlock(range_kernel_config.blockdim, 1, 1);
     dim3 DimGrid(griddim, 1, 1);
 
-    // fprintf(stderr, "total_n %lu, cut_num %lu, griddim %d blockdim %d\n",
-    //         dev_mem->total_n, dev_mem->num_cut, dev_mem->griddim,
-    //         range_kernel_config.blockdim);
-
     // Run kernel
-    // range_selection_kernel<<<DimGrid, DimBlock>>>(d_ax, d_start_idx, d_end_idx, d_read_end_idx, d_range);
     range_selection_kernel_binary<<<DimGrid, DimBlock, 0, *stream>>>(
-        dev_mem->d_ax, dev_mem->d_start_idx, dev_mem->d_read_end_idx,
+        dev_mem->d_ax, dev_mem->d_xrev, dev_mem->d_start_idx, dev_mem->d_read_end_idx,
         dev_mem->d_range, dev_mem->d_cut, dev_mem->d_cut_start_idx, total_n, range_kernel_config);
     cudaCheck();
-#ifdef DEBUG_VERBOSE
-    fprintf(stderr, "[Info] Range Kernel Launched, grid %d cut %d\n", DimGrid.x, cut_num);
+#ifdef DEBUG_PRINT
+    // fprintf(stderr, "[Info] %s (%s:%d): Batch total_n %lu, Range Kernel Launched, grid %d cut %d\n", __func__, __FILE__, __LINE__, total_n, DimGrid.x, cut_num);
 #endif
 }
 
-void plrange_sync_range_selection(deviceMemPtr *dev_mem, Misc misc
-#ifdef DEBUG_CHECK
-    , chain_read_t *reads
-#endif
-) {
+void plrange_sync_range_selection(deviceMemPtr *dev_mem, Misc misc) {
     size_t total_n = dev_mem->total_n, cut_num = dev_mem->num_cut;
     int griddim = dev_mem->griddim;
     dim3 DimBlock(range_kernel_config.blockdim, 1, 1);
@@ -270,51 +263,18 @@ void plrange_sync_range_selection(deviceMemPtr *dev_mem, Misc misc
     plrange_upload_misc(misc);
 
     // Run kernel
-#ifdef DEBUG_VERBOSE
-        fprintf(stderr, "Grim Dim: %d Cut: %zu Anchors: %zu\n", DimGrid.x,
+#ifdef DEBUG_PRINT
+        fprintf(stderr, "[Info] %s (%s:%d): Grim Dim: %d Cut: %zu Anchors: %zu\n", __func__, __FILE__, __LINE__, DimGrid.x,
                 cut_num, total_n);
 #endif
-    // range_selection_kernel<<<DimGrid, DimBlock>>>(d_ax, d_start_idx, d_read_end_idx, d_range);
     range_selection_kernel_binary<<<DimGrid, DimBlock>>>(
-        dev_mem->d_ax, dev_mem->d_start_idx, dev_mem->d_read_end_idx,
+        dev_mem->d_ax, dev_mem->d_xrev, dev_mem->d_start_idx, dev_mem->d_read_end_idx,
         dev_mem->d_range, dev_mem->d_cut, dev_mem->d_cut_start_idx, total_n, range_kernel_config);
-#ifdef DEBUG_VERBOSE
-    fprintf(stderr, "Kernel Launched\n");
-#endif
     cudaCheck();
     cudaDeviceSynchronize();
     cudaCheck();
-#ifdef DEBUG_VERBOSE
-    fprintf(stderr, "[M::%s] range calculation success\n", __func__);
-#endif
-
-
-
-
-#ifdef DEBUG_CHECK
-    //check range
-    int32_t* range = (int32_t*)malloc(sizeof(int32_t) * total_n);
-    cudaMemcpy(range, dev_mem->d_range, sizeof(int32_t) * total_n, cudaMemcpyDeviceToHost);
-
-    size_t* cut = (size_t*)malloc(sizeof(size_t)*cut_num);
-    cudaMemcpy(cut, dev_mem->d_cut, sizeof(size_t)*cut_num, cudaMemcpyDeviceToHost);
-    for (int readid=0, cid=0, idx=0; readid<dev_mem->size; readid++){
-#ifdef DEBUG_VERBOSE
-        debug_print_cut(cut + cid, cut_num - cid, reads[readid].n, idx);
-#endif
-        cid += debug_check_cut(cut + cid, range, cut_num - cid, reads[readid].n, idx);
-        idx += reads[readid].n;
-    }
-    int64_t read_start = 0;
-    for (int i = 0; i<dev_mem->size; i++){
-#ifdef DEBUG_VERBOSE
-        debug_print_successor_range(range + read_start, reads[i].n);
-#endif
-        // debug_check_range(range + read_start, input_arr[i].range, input_arr[i].n);
-        read_start += reads[i].n;
-    }
-    free(range);
-    free(cut);
+#ifdef DEBUG_PRINT
+    fprintf(stderr, "[Info] %s: range calculation success\n", __func__);
 #endif
 }
 
