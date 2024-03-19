@@ -96,7 +96,7 @@ void plmem_malloc_device_mem(deviceMemPtr *dev_mem, size_t anchor_per_batch, int
     cudaMalloc(&dev_mem->d_long_seg, dev_mem->buffer_size_long / (score_kernel_config.long_seg_cutoff * score_kernel_config.cut_unit) * sizeof(seg_t));
     cudaMalloc(&dev_mem->d_long_seg_og, dev_mem->buffer_size_long / (score_kernel_config.long_seg_cutoff * score_kernel_config.cut_unit) * sizeof(seg_t));
     cudaMalloc(&dev_mem->d_mid_seg_count, sizeof(unsigned int));
-    cudaMalloc(&dev_mem->d_mid_seg, num_cut/(score_kernel_config.mid_seg_cutoff) * sizeof(seg_t));
+    cudaMalloc(&dev_mem->d_mid_seg, num_cut/(score_kernel_config.mid_seg_cutoff + 1) * sizeof(seg_t));
 
     size_t gpu_free_mem, gpu_total_mem;
     cudaMemGetInfo(&gpu_free_mem, &gpu_total_mem);
@@ -542,7 +542,11 @@ void plmem_config_batch(cJSON *json, int *num_stream_,
 // intialize and config kernels for gpu blocking setup
 void plmem_initialize(size_t *max_total_n_, int *max_read_,
                       int *min_anchors_) {
+#ifndef GPU_CONFIG
     cJSON *json = plmem_parse_gpu_config("gpu_config.json");
+#else 
+    cJSON *json = plmem_parse_gpu_config(GPU_CONFIG);
+#endif
     plmem_config_kernels(json);
     int num_streams;
     size_t buffer_size_long;
