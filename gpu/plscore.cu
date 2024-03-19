@@ -446,6 +446,7 @@ __global__ void score_generation_long_map(int32_t* anchors_x, int32_t* anchors_y
         seg_count++;
         if (tid == 0) segid = atomicAdd(&curr_long_segid, 1);
         __syncthreads();
+    }
 }
 
 __global__ void score_generation_naive(int32_t* anchors_x, int32_t* anchors_y, int8_t* sid, int32_t *range,
