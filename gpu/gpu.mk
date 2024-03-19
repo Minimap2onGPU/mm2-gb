@@ -16,7 +16,7 @@ INCLUDES		+= -I gpu
 ###################################################
 COMPUTE_ARCH    = $(GPUARCH:sm_%=compute_%)
 NVCC 			= nvcc
-CUDAFLAGS		= -rdc=true -lineinfo -gencode arch=$(COMPUTE_ARCH),code=$(GPUARCH)
+CUDAFLAGS		= -rdc=true -gencode arch=$(COMPUTE_ARCH),code=$(GPUARCH) -diag-suppress=177 # supress unused variable / func warning
 CUDATESTFLAG	= -G
 
 ###################################################
