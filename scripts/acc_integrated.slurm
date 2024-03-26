@@ -36,8 +36,8 @@ cd $MM2_ROOT
 make clean
 # debug level: N/A info analyze verbose
 make GPU=AMD DEBUG=analyze
-# ./minimap2 -K 2000000000 -t 1 --gpu-chain --gpu-cfg /shared/prod/home/liuxs/bioinfo/minimap2/mi210_over50k.json /shareddata/umich_folder/data/ONT/hg38.mmi /shareddata/umich_folder/data/ONT/random_5GBases_90kto100k.fa > out.paf
-# echo "Exit: $?"
+./minimap2 -K 2000000000 -t 1 --gpu-chain --gpu-cfg /shared/prod/home/liuxs/bioinfo/minimap2/mi210_over50k.json /shareddata/umich_folder/data/ONT/hg38.mmi /shareddata/umich_folder/data/ONT/random_5GBases_90kto100k.fa > out.paf
+echo "Exit: $?"
 ./minimap2 -K 2000000000 -t 1 --gpu-chain --gpu-cfg /shared/prod/home/liuxs/bioinfo/minimap2/mi210_below50k.json /shareddata/umich_folder/data/ONT/hg38.mmi /shareddata/umich_folder/data/ONT/random_5GBases_20kto30k.fa > out.paf
 echo "Exit: $?"
 ./minimap2 -K 2000000000 -t 1 --gpu-chain --gpu-cfg /shared/prod/home/liuxs/bioinfo/minimap2/mi210_below50k.json /shareddata/umich_folder/data/ONT/hg38.mmi /shareddata/umich_folder/data/ONT/random_5GBases_60kto70k.fa > out.paf
