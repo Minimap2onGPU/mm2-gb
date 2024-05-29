@@ -52,6 +52,38 @@ mm_idx_t *mm_idx_init(int w, int k, int b, int flag)
 	if (!(mm_dbg_flag & 1)) mi->km = km_init();
 	return mi;
 }
+void mm_idx_destroy_mm_hash(mm_idx_t *mi)
+{
+	fprintf(stderr, "mm_destroy_hash\n");
+	uint32_t i;
+	if (mi == 0) return;
+	if (mi->h) kh_destroy(str, (khash_t(str)*)mi->h);
+	if (mi->B) {
+		for (i = 0; i < 1U<<mi->b; ++i) {
+			free(mi->B[i].p);
+			free(mi->B[i].a.a);
+			kh_destroy(idx, (idxhash_t*)mi->B[i].h);
+		}
+	}
+}
+void mm_idx_destroy_seq(mm_idx_t *mi)
+{
+	//fprintf(stderr, "mm_destroy_seq\n");
+
+	uint32_t i;
+	if (mi == 0) return;
+	if (mi->I) {
+		for (i = 0; i < mi->n_seq; ++i)
+			free(mi->I[i].a);
+		free(mi->I);
+	}
+	if (!mi->km) {
+		for (i = 0; i < mi->n_seq; ++i)
+			free(mi->seq[i].name);
+		free(mi->seq);
+	} else km_destroy(mi->km);
+	free(mi->B); free(mi->S); free(mi);
+}
 
 void mm_idx_destroy(mm_idx_t *mi)
 {

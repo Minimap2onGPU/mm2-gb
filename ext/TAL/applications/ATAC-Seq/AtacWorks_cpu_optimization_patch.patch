@@ -1,0 +1,935 @@
+diff --git a/Dockerfile b/Dockerfile
+index 4f1ce56..79f5ab4 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -31,3 +31,4 @@ RUN git clone --recursive https://github.com/clara-genomics/AtacWorks.git
+ 
+ # Install AtacWorks requirements
+ RUN pip3 install -r AtacWorks/requirements-base.txt && pip3 install -r AtacWorks/requirements-macs2.txt
++RUN pip install .
+diff --git a/claragenomics/dl4atac/dataset.py b/claragenomics/dl4atac/dataset.py
+index 92b00a9..11b2586 100755
+--- a/claragenomics/dl4atac/dataset.py
++++ b/claragenomics/dl4atac/dataset.py
+@@ -86,6 +86,7 @@ class DatasetTrain(DatasetBase):
+             idx: Index for which the batch is to be returned.
+ 
+         """
++        
+         if self._h5_gen is None:
+             self._h5_gen = self._get_generator()
+             next(self._h5_gen)
+@@ -104,6 +105,7 @@ class DatasetTrain(DatasetBase):
+         for i, filename in enumerate(self.files):
+             # print('loading H5Py file %s' % filename)
+             hf = h5py.File(filename, 'r')
++            
+             # Read noisy data and labels
+             for key in hf.keys():
+                 hrecs[key].append(hf[key])
+@@ -123,7 +125,7 @@ class DatasetTrain(DatasetBase):
+                         rec['input'],
+                         hrecs[layer_key][file_id][local_idx]))
+                 rec['input'] = np.swapaxes(rec['input'], 0, 1)
+-            yield rec
++            idx = yield rec                                         # Inportant (Change)
+ 
+ 
+ class DatasetInfer(DatasetBase):
+diff --git a/claragenomics/dl4atac/evaluate.py b/claragenomics/dl4atac/evaluate.py
+index d4f5b35..27962fb 100755
+--- a/claragenomics/dl4atac/evaluate.py
++++ b/claragenomics/dl4atac/evaluate.py
+@@ -52,7 +52,6 @@ def evaluate(*, rank, gpu, task, model, val_loader, metrics_reg,
+     print('Eval for %d batches' % num_batches)
+     with torch.no_grad():
+         for i, batch in enumerate(val_loader):
+-            # idxes = batch['idx']
+             x = batch['input']
+             y_reg = batch['label_reg']
+             y_cla = batch['label_cla']
+@@ -68,7 +67,9 @@ def evaluate(*, rank, gpu, task, model, val_loader, metrics_reg,
+                 x = x.unsqueeze(1)  # (N, 1, L)
+             else:
+                 x = np.swapaxes(x, 1, 2)
+-            x = x.cuda(gpu, non_blocking=True)
++            # x = x.cuda(gpu, non_blocking=True)
++            if gpu >= 0:                                    # (Change)
++                x = x.cuda(gpu, non_blocking=True)
+ 
+             # transform coverage track if required
+             if transform == 'log':
+@@ -135,8 +136,6 @@ def evaluate(*, rank, gpu, task, model, val_loader, metrics_reg,
+             del y_cla_list
+             del pred_cla_list
+ 
+-        # gather_start = time.time()
+-        # gather the results across all devices
+         if distributed:
+             if task == 'both' or task == 'regression':
+                 ys_reg = gather_tensor(ys_reg, world_size=world_size,
+@@ -148,10 +147,7 @@ def evaluate(*, rank, gpu, task, model, val_loader, metrics_reg,
+                                        rank=rank)
+                 preds_cla = gather_tensor(
+                     preds_cla, world_size=world_size, rank=rank)
+-            # myprint("Gathering takes {}s".format(time.time()-gather_start),
+-            # rank=rank)
+ 
+-        # now with the results of whole dataset, compute metrics on device 0
+         if rank == 0:
+             if task == 'both' or task == 'classification':
+                 for metric in metrics_cla:
+diff --git a/claragenomics/dl4atac/infer.py b/claragenomics/dl4atac/infer.py
+index 88d3b7b..11dc8af 100644
+--- a/claragenomics/dl4atac/infer.py
++++ b/claragenomics/dl4atac/infer.py
+@@ -60,7 +60,10 @@ def infer(*, rank, gpu, task, model, infer_loader, print_freq,
+                 x = x.unsqueeze(1)  # (N, 1, L)
+             else:
+                 x = np.swapaxes(x, 1, 2)
+-            x = x.cuda(gpu, non_blocking=True)
++                
++            if gpu >= 0:
++                x = x.cuda(gpu, non_blocking=True)
++                
+             count += x.shape[0]
+ 
+             # transform coverage track if required
+diff --git a/claragenomics/dl4atac/layers.py b/claragenomics/dl4atac/layers.py
+index fb914bf..82a34ec 100755
+--- a/claragenomics/dl4atac/layers.py
++++ b/claragenomics/dl4atac/layers.py
+@@ -13,6 +13,10 @@ import torch
+ import torch.nn as nn
+ import torch.nn.functional as F
+ 
++try:
++    from Conv1dOpti_ext import Conv1dOpti, ReLU_bf16                # (Change)
++except ImportError as e:
++    print(e)
+ 
+ class ZeroSamePad1d(nn.Module):
+     """Apply SAME zero padding to input."""
+@@ -121,7 +125,10 @@ class ConvAct1d(nn.Module):
+ 
+         self.padding_layer = ZeroSamePad1d(
+             interval_size, kernel_size, stride, dilation)
+-        self.conv_layer = nn.Conv1d(
++        # self.conv_layer = nn.Conv1d(
++        #     in_channels, out_channels, kernel_size, stride, padding=0,
++        #     dilation=dilation, bias=bias)
++        self.conv_layer = Conv1dOpti(                                       # (Change)
+             in_channels, out_channels, kernel_size, stride, padding=0,
+             dilation=dilation, bias=bias)
+         self.bn_layer = nn.BatchNorm1d(out_channels) if bn else None
+@@ -138,8 +145,15 @@ class ConvAct1d(nn.Module):
+         x = self.conv_layer(x)
+         if self.bn_layer:
+             x = self.bn_layer(x)
+-        if self.act_layer:
+-            x = self.act_layer(x)
++        if self.act_layer:                          # (Change)
++            if x.dtype != torch.float32:
++                x = x.to(torch.float32)
++                x = self.act_layer(x)
++                x = x.to(torch.bfloat16)
++                x = ReLU_bf16.apply(x)
++                # pass
++            else:
++                x = self.act_layer(x)
+         return x
+ 
+ 
+@@ -200,8 +214,14 @@ class ResBlock(nn.Module):
+         x = self.conv_act2(x)
+         x = self.conv_act3(x)
+         x = x + self.conv_input(input)
+-        x = self.activation(x)
+-
++        if x.dtype != torch.float32:                    # (Change)
++            x = x.to(torch.float32)
++            x = self.activation(x)
++            x = x.to(torch.bfloat16)
++            x = ReLU_bf16.apply(x)
++            # pass
++        else:
++            x = self.activation(x)
+         return x
+ 
+ 
+diff --git a/claragenomics/dl4atac/losses.py b/claragenomics/dl4atac/losses.py
+index 2da4ef6..1fd4437 100755
+--- a/claragenomics/dl4atac/losses.py
++++ b/claragenomics/dl4atac/losses.py
+@@ -133,8 +133,11 @@ class MultiLoss(object):
+ 
+         """
+         # TODO: error checking for self.device
+-        if self.device:
+-            loss_func = loss_func.cuda(self.device)
++        if self.device >= 0:                                # (Change)
++            if self.device:
++                loss_func = loss_func.cuda(self.device)
++        # else:
++        #     loss_func = loss_func.to('cpu')
+         return loss_func
+ 
+     def single_output_loss(self, pred, label):
+diff --git a/claragenomics/dl4atac/models/model_utils.py b/claragenomics/dl4atac/models/model_utils.py
+index 5e89016..db2d2ba 100644
+--- a/claragenomics/dl4atac/models/model_utils.py
++++ b/claragenomics/dl4atac/models/model_utils.py
+@@ -158,11 +158,11 @@ def build_model(rank, interval_size, resume,
+                                 dilation_class=model_args.dil_cla,
+                                 in_channels=model_args.in_channels)
+ 
+-    elif model == 'linear':
++    elif model_args.model == 'linear':
+         model = DenoisingLinear(
+             interval_size=interval_size, field=model_args.field)
+ 
+-    elif model == 'logistic':
++    elif model_args.model == 'logistic':
+         model = DenoisingLogistic(
+             interval_size=interval_size, field=model_args.field)
+ 
+@@ -171,11 +171,16 @@ def build_model(rank, interval_size, resume,
+     if resume or infer or evaluate:
+         model = load_model(model, weights_path, rank)
+ 
+-    model = model.cuda(gpu)
+-
++    # model = model.cuda(gpu)
++    if gpu >= 0:                        # (Change)
++        model = model.cuda(gpu)
++        
+     if distributed:
+         _logger.info('Compiling model in DistributedDataParallel')
+-        model = DistributedDataParallel(model, device_ids=[gpu])
++        if gpu < 0:
++            model = DistributedDataParallel(model)
++        else:
++            model = DistributedDataParallel(model, device_ids=[gpu])
+     elif gpu > 1:
+         _logger.info('Compiling model in DataParallel')
+         model = nn.DataParallel(
+diff --git a/claragenomics/dl4atac/models/models.py b/claragenomics/dl4atac/models/models.py
+index 6a5aa60..b05080a 100644
+--- a/claragenomics/dl4atac/models/models.py
++++ b/claragenomics/dl4atac/models/models.py
+@@ -51,6 +51,7 @@ class DenoisingResNet(nn.Module):
+             blocks in the classification part of the model
+ 
+         """
++
+         self.interval_size = interval_size
+         super(DenoisingResNet, self).__init__()
+ 
+@@ -100,12 +101,18 @@ class DenoisingResNet(nn.Module):
+         """
+         for res_block in self.res_blocks:
+             x = res_block(x)
++
+         x = self.regressor(x)
+-        out_reg = x.squeeze(1)
++        if x.dtype != torch.float32:                    # (Change for Bfloat16)
++            out_reg = x.squeeze(1).to(torch.float32)
++        else:
++            out_reg = x.squeeze(1)
++
+         for res_block in self.res_blocks_class:
+             x = res_block(x)
+-        out_cla = torch.sigmoid(self.classifier(x).squeeze(1))
+ 
++        out_cla = torch.sigmoid(self.classifier(x).squeeze(1))
++        
+         return out_reg, out_cla
+ 
+ 
+diff --git a/claragenomics/dl4atac/train.py b/claragenomics/dl4atac/train.py
+index 42f01d8..d30416e 100755
+--- a/claragenomics/dl4atac/train.py
++++ b/claragenomics/dl4atac/train.py
+@@ -14,10 +14,23 @@ import time
+ from claragenomics.dl4atac.utils import myprint, progbar, equal_width_formatter
+ 
+ import torch
++# import extend_profiler
+ import torch.distributed as dist
+-
++# print(extend_profiler.__file__)
+ import numpy as np
+ 
++# def print_op_timings(prof, use_gpu, prefix):
++#     sorted_fe = sorted(prof.function_events, key=lambda event: [event.cpu_interval.start, -event.cpu_interval.end],)
++#     start_time = sorted_fe[0].cpu_interval.start if len(sorted_fe) > 0 else 0
++
++#     with open("%s.OpTimings_cpu_bf16_2.txt" % prefix, "w") as f:
++#         for i, fe in enumerate(sorted_fe):
++#             fe_name = getattr(fe, 'nested_key', fe.name)
++#             cstr = ""
++#             if use_gpu:
++#                for kinfo in fe.kernels: cstr += " %10.3f %10.3f %8.3f %8.3f " % ((kinfo.interval.start - start_time) /1000.0, (kinfo.interval.end - start_time)/1000.0, (kinfo.interval.start - fe.cpu_interval.start) /1000.0, kinfo.interval.elapsed_us()/1000.0)
++#                #for kinfo in fe.kernels: cstr += " %12.4f %12.4f %12.4f " % ((kinfo.interval.start - fe.cpu_interval.start) /1000.0, (kinfo.interval.end - fe.cpu_interval.start)/1000.0, kinfo.interval.elapsed_us()/1000.0)
++#             print("%-3d %-6d %6d %12.4f %12.4f %12.4f %2s %s   %-40s    %s" % (0, i, fe.id, (fe.cpu_interval.start - start_time)/1000.0, (fe.cpu_interval.end - start_time)/1000.0, fe.cpu_interval.elapsed_us()/1000.0, fe.thread, cstr, fe_name.replace(' ', '_'), fe.input_shapes), file=f)
+ 
+ def train(*, rank, gpu, task, model, train_loader, loss_func, optimizer, pad,
+           epoch, epochs, clip_grad, print_freq, distributed, world_size,
+@@ -43,6 +56,7 @@ def train(*, rank, gpu, task, model, train_loader, loss_func, optimizer, pad,
+ 
+     """
+     num_batches = len(train_loader)
++    
+     epoch_formatter = "Epoch " + \
+                       equal_width_formatter(total=epochs).format(epoch)
+     start = time.time()
+@@ -50,6 +64,12 @@ def train(*, rank, gpu, task, model, train_loader, loss_func, optimizer, pad,
+     backward_time = 0.
+     print_time = 0.
+ 
++    enable_profiling = False
++    if gpu >= 0:
++        use_cuda = True
++    else:
++        use_cuda = False
++    
+     model.train()
+ 
+     print(
+@@ -57,6 +77,7 @@ def train(*, rank, gpu, task, model, train_loader, loss_func, optimizer, pad,
+ 
+     # Loop training data
+     for i, batch in enumerate(train_loader):
++        
+         x = batch['input']
+         y_reg = batch['label_reg']
+         y_cla = batch['label_cla']
+@@ -66,16 +87,18 @@ def train(*, rank, gpu, task, model, train_loader, loss_func, optimizer, pad,
+             x = x.unsqueeze(1)  # (N, 1, L)
+         else:
+             x = np.swapaxes(x, 1, 2)
+-        x = x.cuda(gpu, non_blocking=True)
+-
+-        if task == 'regression':
+-            y = y_reg.cuda(gpu, non_blocking=True)
+-        elif task == 'classification':
+-            y = y_cla.cuda(gpu, non_blocking=True)
+-        elif task == 'both':
+-            y_reg = y_reg.cuda(gpu, non_blocking=True)
+-            y_cla = y_cla.cuda(gpu, non_blocking=True)
+ 
++        if gpu >= 0:                                        # (Change)
++            x = x.cuda(gpu, non_blocking=True)
++            if task == 'regression':
++                y = y_reg.cuda(gpu, non_blocking=True)
++            elif task == 'classification':
++                y = y_cla.cuda(gpu, non_blocking=True)
++            elif task == 'both':
++                y_reg = y_reg.cuda(gpu, non_blocking=True)
++                y_cla = y_cla.cuda(gpu, non_blocking=True)
++        
++        # with torch.autograd.profiler.profile(enable_profiling, use_cuda, True) as prof:
+         # transform tracks if required
+         if transform == 'log':
+             x = torch.log(x + 1)
+@@ -87,7 +110,7 @@ def train(*, rank, gpu, task, model, train_loader, loss_func, optimizer, pad,
+         # Model forward pass
+         t = time.time()
+         pred = model(x)
+-
++        
+         # Remove padding
+         if pad is not None:
+             center = range(pad, x.shape[2] - pad)
+@@ -119,7 +142,9 @@ def train(*, rank, gpu, task, model, train_loader, loss_func, optimizer, pad,
+         # one gradient descent step
+         optimizer.zero_grad()
+         t = time.time()
++        
+         total_loss_value.backward()
++        
+         if clip_grad > 0:
+             torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
+         optimizer.step()
+@@ -137,11 +162,30 @@ def train(*, rank, gpu, task, model, train_loader, loss_func, optimizer, pad,
+             if rank == 0:
+                 post_bar_msg = " | ".join(
+                     [k + ':{:8.3f}'.format(v.cpu().item()) for k, v in
+-                     losses_values.items()])
++                    losses_values.items()])
+                 progbar(curr=i, total=num_batches, progbar_len=20,
+                         pre_bar_msg=epoch_formatter, post_bar_msg=post_bar_msg)
+             print_time += time.time() - t
+ 
++        # if enable_profiling:
++        #     if use_cuda == True:
++        #         with open("profiler_out/Atacwork_cuda_new.prof", "w") as prof_f:
++        #             prof_f.write(prof.key_averages().table(sort_by="cuda_time_total"))
++        #         with open("profiler_out/Atacwork_cuda_new.nested.prof", "w") as prof_f:
++        #             prof_f.write(prof.nested_key_averages().table(sort_by="cuda_time_total")) 
++        #         with open("profiler_out/Atacwork_cuda_new.toplevel.prof", "w") as prof_f:
++        #             prof_f.write(prof.nested_key_averages(only_top_level=True).table(sort_by="cuda_time_total"))
++        #         print_op_timings(prof, use_cuda, "profiler_out/")
++        #     else:
++        #         with open("profiler_out/Atacwork_cpu_bf16_2.prof", "w") as prof_f:
++        #             prof_f.write(prof.key_averages().table(sort_by="cpu_time_total"))
++        #         with open("profiler_out/Atacwork_cpu_bf16_2.nested.prof", "w") as prof_f:
++        #             prof_f.write(prof.nested_key_averages().table(sort_by="cpu_time_total")) 
++        #         with open("profiler_out/Atacwork_cpu_bf16_2.toplevel.prof", "w") as prof_f:
++        #             prof_f.write(prof.nested_key_averages(only_top_level=True).table(sort_by="cpu_time_total"))
++        #         print_op_timings(prof, use_cuda, "profiler_out/") 
++
++
+     myprint(
+         epoch_formatter + " Time Taken: {:7.3f}s".format(time.time() - start),
+         color='yellow', rank=rank)
+@@ -154,3 +198,5 @@ def train(*, rank, gpu, task, model, train_loader, loss_func, optimizer, pad,
+         'time: %.3f\tRemain (data) time: %.3f' % (total_time, forward_time,
+                                                   backward_time, print_time,
+                                                   remainder_time))
++
++    
+\ No newline at end of file
+diff --git a/claragenomics/dl4atac/utils.py b/claragenomics/dl4atac/utils.py
+index fc822d8..4aae253 100755
+--- a/claragenomics/dl4atac/utils.py
++++ b/claragenomics/dl4atac/utils.py
+@@ -78,7 +78,11 @@ def make_experiment_dir(label, out_home, timestamp=True,
+                                       "{}_{}".format(label, "latest"))
+         if (os.path.islink(latest_symlink)):
+             os.remove(latest_symlink)
+-        os.symlink(os.path.abspath(exp_path), latest_symlink)
++        # os.symlink(os.path.abspath(exp_path), latest_symlink)
++        try:
++            os.symlink(os.path.abspath(exp_path), latest_symlink)               # (Change)
++        except:
++            pass
+     return exp_path
+ 
+ 
+diff --git a/configs/infer_config.yaml b/configs/infer_config.yaml
+index e0421cd..80868ad 100644
+--- a/configs/infer_config.yaml
++++ b/configs/infer_config.yaml
+@@ -14,12 +14,12 @@ label: 'inference_output'
+ task: 'both'
+ print_freq: 50
+ bs: 512
+-num_workers: 4
++num_workers: 1
+ weights_path: "None"
+-gpu: 0
++gpu: -1
+ distributed: False
+-dist-url: 'tcp://127.0.0.1:4321'
+-dist-backend: 'gloo'
++dist-url: "env://"   # # 'tcp://127.0.0.1:4321'
++dist-backend: 'ccl'   # 'gloo'           
+ debug: False
+ 
+ # Data processing args
+diff --git a/configs/model_structure.yaml b/configs/model_structure.yaml
+index e296b3b..e587cf4 100644
+--- a/configs/model_structure.yaml
++++ b/configs/model_structure.yaml
+@@ -18,7 +18,7 @@ dil: 8                   # dilation for regression blocks in resnet
+ width: 51                # kernel size for regression blocks in resnet
+ nfilt: 15                # number of filters for regression blocks in resnet 
+ nblocks_cla: 2           # number of classification blocks for resnet
+-dil_cla: 8               # dilation for classification blocks in resnet
++dil_cla: 8             # dilation for classification blocks in resnet
+ width_cla: 51            # kernel size for classification blocks in resnet
+ nfilt_cla: 15            # number of filters for classification blocks in resnet
+ field: None              # receptive field, only defined for linear/logistic regression
+diff --git a/configs/train_config.yaml b/configs/train_config.yaml
+index 27bbcf3..79252aa 100644
+--- a/configs/train_config.yaml
++++ b/configs/train_config.yaml
+@@ -14,13 +14,13 @@ out_home: './'
+ label: 'trained_models'
+ task: 'both'
+ print_freq: 50
+-bs: 64
+-num_workers: 4
++bs: 54                  #64 original
++num_workers: 1          #4 original
+ weights_path: "None"
+-gpu: 0
++gpu: -1
+ distributed: False
+-dist-url: 'tcp://127.0.0.1:4321'
+-dist-backend: 'gloo'
++dist-url: "env://"                       # 'tcp://127.0.0.1:4321'
++dist-backend: 'ccl'    # 'gloo'
+ debug: False
+ 
+ # Data processing args
+@@ -35,8 +35,8 @@ save_freq: 1
+ 
+ #Learning args
+ clip_grad: 0 
+-lr: 0.0002 
+-epochs: 25
++lr: 0.0002              # 0.0002 original
++epochs: 25              #25 original
+ mse_weight: 0.0005 
+ pearson_weight: 1
+ poisson_weight: 0
+diff --git a/requirements-base.txt b/requirements-base.txt
+index 549dc41..9081f05 100644
+--- a/requirements-base.txt
++++ b/requirements-base.txt
+@@ -19,8 +19,11 @@ pyyaml==5.3
+ scikit-learn==0.21.3
+ scipy==1.3.2
+ termcolor==1.1.0
+-torch==1.2.0
+-torchvision==0.3.0
++# torch==1.2.0
++# torchvision==0.3.0
+ scikit-learn==0.21.3
+ scipy==1.3.2
+ configargparse==0.15.2
++pytest==4.4.1
++psutil==5.7.0
++# torch-ccl==1.0
+\ No newline at end of file
+diff --git a/scripts/main.py b/scripts/main.py
+index 9f8e4b3..20d82b1 100755
+--- a/scripts/main.py
++++ b/scripts/main.py
+@@ -43,6 +43,12 @@ import torch.multiprocessing as mp
+ 
+ from worker import eval_worker, infer_worker, train_worker
+ 
++try:
++    import torch_ccl                                 # (Change) CCL import
++except ImportError as e:
++    print(e)
++    torch_ccl = False 
++
+ warnings.filterwarnings("ignore")
+ 
+ # Set up logging
+@@ -173,17 +179,13 @@ def writer(infer, intervals_file, exp_dir, result_fname,
+     out_base_path = os.path.join(exp_dir, prefix + "_" + result_fname)
+     if task == "regression":
+         channels = [0]
+-        outfiles = [os.path.join(out_base_path + ".track.bedGraph")]
+-        rounding = [reg_rounding]
+     elif task == "classification":
+         channels = [1]
+-        outfiles = [os.path.join(out_base_path + ".peaks.bedGraph")]
+-        rounding = [cla_rounding]
+     elif task == "both":
+         channels = [0, 1]
+-        outfiles = [os.path.join(out_base_path + ".track.bedGraph"),
+-                    os.path.join(out_base_path + ".peaks.bedGraph")]
+-        rounding = [reg_rounding, cla_rounding]
++    outfiles = [os.path.join(out_base_path + ".track.bedGraph"),
++                os.path.join(out_base_path + ".peaks.bedGraph")]
++    rounding = [reg_rounding, cla_rounding]
+ 
+     # Temp dir used to save temp files during multiprocessing.
+     temp_dir = tempfile.mkdtemp()
+@@ -314,7 +316,12 @@ def main():
+ 
+     # check gpu
+     # TODO: add cpu support
+-    if not torch.cuda.is_available():
++    # if not torch.cuda.is_available():
++    #     raise Exception("No GPU available. Check your machine configuration.")
++    
++    if args.gpu < 0:                                                    # (Change)
++        print("Running on CPU: ", args.gpu)
++    elif not torch.cuda.is_available():
+         raise Exception("No GPU available. Check your machine configuration.")
+ 
+     # all output will be written in the exp_dir folder
+@@ -337,7 +344,7 @@ def main():
+         with h5py.File(args.files_train[0], 'r') as f:
+             args.interval_size = f['input'].shape[1]
+             args.batch_size = 1
+-
++        
+         ngpus_per_node = torch.cuda.device_count()
+         # WAR: gloo distributed doesn't work if world size is 1.
+         # This is fixed in newer torch version -
+@@ -346,7 +353,8 @@ def main():
+ 
+         config_dir = os.path.join(args.exp_dir, "configs")
+         if not os.path.exists(config_dir):
+-            os.mkdir(config_dir)
++            # os.mkdir(config_dir)
++            os.makedirs(config_dir, exist_ok=True) 
+         if args.distributed:
+             _logger.info('Distributing to %s GPUS' % str(ngpus_per_node))
+             args.world_size = ngpus_per_node
+@@ -355,7 +363,10 @@ def main():
+         else:
+             assert_device_available(args.gpu)
+             _logger.info('Running on GPU: %s' % str(args.gpu))
+-            args.world_size = 1
++            # args.world_size = 1                                      #(Change)
++            args.world_size = int(os.environ.get("PMI_SIZE",1)) 
++            if args.world_size > 1:
++                args.distributed = True
+             train_worker(args.gpu, ngpus_per_node, args, timers=Timers)
+ 
+     # infer & eval
+@@ -409,7 +420,8 @@ def main():
+             write_proc = mp.Process(target=writer, kwargs=keyword_args)
+             write_proc.start()
+             #############################################################
+-
++            
++            
+             ngpus_per_node = torch.cuda.device_count()
+             # WAR: gloo distributed doesn't work if world size is 1.
+             # This is fixed in newer torch version -
+@@ -425,6 +437,9 @@ def main():
+             else:
+                 assert_device_available(args.gpu)
+                 args.world_size = 1
++                # args.world_size = int(os.environ.get("PMI_SIZE",1)) 
++                # if args.world_size > 1:
++                #     args.distributed = True
+                 worker(args.gpu, ngpus_per_node, args, res_queue)
+ 
+             # finish off writing
+diff --git a/scripts/worker.py b/scripts/worker.py
+index 564afe1..a00ab47 100644
+--- a/scripts/worker.py
++++ b/scripts/worker.py
+@@ -35,6 +35,14 @@ import torch
+ import torch.distributed as dist
+ 
+ from torch.optim import Adam
++import os
++
++# import extend_profiler
++# import psutil
++try:
++    import psutil                           # (Change)
++except ImportError as e:
++    print(e)
+ 
+ warnings.filterwarnings("ignore")
+ 
+@@ -48,6 +56,28 @@ _handler.setFormatter(log_formatter)
+ _logger.setLevel(logging.INFO)
+ _logger.addHandler(_handler)
+ 
++def worker_init_fn(worker_id):                      # (Change)
++    cpu_aff = psutil.Process().cpu_affinity()
++    cpu_aff_new = [cpu_aff[0] - worker_id -1]
++    try:
++        psutil.Process().cpu_affinity(cpu_aff_new)
++        print("Worker {} with pid {} called, new affinity = {}".format(worker_id, os.getpid(), psutil.Process().cpu_affinity()))
++    except:
++        print("Unable to set worker affinity {} for worker {}".format(cpu_aff_new, worker_id))
++
++# def print_op_timings(prof, use_gpu, prefix):
++#     sorted_fe = sorted(prof.function_events, key=lambda event: [event.cpu_interval.start, -event.cpu_interval.end],)
++#     start_time = sorted_fe[0].cpu_interval.start if len(sorted_fe) > 0 else 0
++
++#     with open("%s.OpTimings_cpu_evaluation_multi.txt" % prefix, "w") as f:
++#         for i, fe in enumerate(sorted_fe):
++#             fe_name = getattr(fe, 'nested_key', fe.name)
++#             cstr = ""
++#             if use_gpu:
++#                for kinfo in fe.kernels: cstr += " %10.3f %10.3f %8.3f %8.3f " % ((kinfo.interval.start - start_time) /1000.0, (kinfo.interval.end - start_time)/1000.0, (kinfo.interval.start - fe.cpu_interval.start) /1000.0, kinfo.interval.elapsed_us()/1000.0)
++#                #for kinfo in fe.kernels: cstr += " %12.4f %12.4f %12.4f " % ((kinfo.interval.start - fe.cpu_interval.start) /1000.0, (kinfo.interval.end - fe.cpu_interval.start)/1000.0, kinfo.interval.elapsed_us()/1000.0)
++#             print("%-3d %-6d %6d %12.4f %12.4f %12.4f %2s %s   %-40s    %s" % (0, i, fe.id, (fe.cpu_interval.start - start_time)/1000.0, (fe.cpu_interval.end - start_time)/1000.0, fe.cpu_interval.elapsed_us()/1000.0, fe.thread, cstr, fe_name.replace(' ', '_'), fe.input_shapes), file=f)
++
+ 
+ def get_losses(task, mse_weight, pearson_weight, gpu, poisson_weight):
+     """Return loss function.
+@@ -135,7 +165,13 @@ def get_model(args, gpu, rank):
+         model_params : model parameters
+ 
+     """
+-    torch.cuda.set_device(gpu)
++    #torch.cuda.set_device(gpu)
++
++    if gpu >= 0:                                # (Change)
++        torch.cuda.set_device(gpu)
++    # else:
++    #     device = torch.device('cpu')
++
+     _logger.debug('Rank %s' % str(rank))
+ 
+     if args.distributed:
+@@ -167,9 +203,15 @@ def train_worker(gpu, ngpu_per_node, args, timers=None):
+     """
+     # fix random seed so models have the same starting weights
+     torch.manual_seed(42)
++    
+ 
+-    rank = gpu if args.distributed else 0
+-
++    # rank = gpu if args.distributed else 0
++    if gpu < 0:                                     #(Change)
++        # rank = 0
++        rank = int(os.environ.get("PMI_RANK",0))
++    else:
++        rank = gpu if args.distributed else 0
++    
+     model, model_params = get_model(args, gpu, rank)
+ 
+     optimizer = Adam(model.parameters(), lr=args.lr)
+@@ -183,12 +225,22 @@ def train_worker(gpu, ngpu_per_node, args, timers=None):
+     if args.distributed:
+         train_sampler = torch.utils.data.distributed.DistributedSampler(
+             train_dataset)
+-    train_loader = torch.utils.data.DataLoader(
+-        train_dataset, batch_size=args.bs, shuffle=(train_sampler is None),
+-        # collate_fn=custom_collate_train,
+-        num_workers=args.num_workers, pin_memory=True, sampler=train_sampler,
+-        drop_last=False
+-    )
++
++    if gpu < 0:                                                         # (Change)
++        train_loader = torch.utils.data.DataLoader(
++            train_dataset, batch_size=args.bs, shuffle=(train_sampler is None),
++            # collate_fn=custom_collate_train,
++            num_workers=args.num_workers, pin_memory=False, sampler=train_sampler,
++            drop_last=False, worker_init_fn=worker_init_fn
++        )
++    else:
++        train_loader = torch.utils.data.DataLoader(
++            train_dataset, batch_size=args.bs, shuffle=(train_sampler is None),
++            # collate_fn=custom_collate_train,
++            num_workers=args.num_workers, pin_memory=True, sampler=train_sampler,
++            drop_last=False
++        )
++        
+ 
+     # TODO: need DatasetVal? Not for now
+     val_dataset = DatasetTrain(files=args.val_files, layers=args.layers)
+@@ -196,29 +248,42 @@ def train_worker(gpu, ngpu_per_node, args, timers=None):
+     if args.distributed:
+         val_sampler = torch.utils.data.distributed.DistributedSampler(
+             val_dataset)
+-    val_loader = torch.utils.data.DataLoader(
+-        val_dataset, batch_size=args.bs, shuffle=False,
+-        # collate_fn=custom_collate_train,
+-        num_workers=args.num_workers, pin_memory=True, sampler=val_sampler,
+-        drop_last=False
+-        # drop_last=True # need to drop irregular batch for distributed
+-        # evaluation due to limitation of dist.all_gather
+-    )
++
++    if gpu < 0:                                                   #(Change)
++        val_loader = torch.utils.data.DataLoader(
++            val_dataset, batch_size=args.bs, shuffle=False,
++            # collate_fn=custom_collate_train,
++            num_workers=args.num_workers, pin_memory=False, sampler=val_sampler,
++            drop_last=False, worker_init_fn=worker_init_fn
++            # drop_last=True # need to drop irregular batch for distributed
++            # evaluation due to limitation of dist.all_gather
++        )
++    else:
++        val_loader = torch.utils.data.DataLoader(
++            val_dataset, batch_size=args.bs, shuffle=False,
++            # collate_fn=custom_collate_train,
++            num_workers=args.num_workers, pin_memory=True, sampler=val_sampler,
++            drop_last=False
++            # drop_last=True # need to drop irregular batch for distributed
++            # evaluation due to limitation of dist.all_gather
++        )
+ 
+     loss_func = get_losses(args.task, args.mse_weight,
+                            args.pearson_weight, gpu, args.poisson_weight)
+ 
+     current_best = None
++
+     for epoch in range(args.epochs):
+         if args.distributed:
+             train_sampler.set_epoch(epoch)
++
+         train(rank=rank, gpu=gpu, task=args.task, model=model,
+-              train_loader=train_loader,
+-              loss_func=loss_func, optimizer=optimizer, epoch=epoch,
+-              epochs=args.epochs, clip_grad=args.clip_grad,
+-              print_freq=args.print_freq, pad=args.pad,
+-              distributed=args.distributed, world_size=args.world_size,
+-              transform=args.transform)
++            train_loader=train_loader,
++            loss_func=loss_func, optimizer=optimizer, epoch=epoch,
++            epochs=args.epochs, clip_grad=args.clip_grad,
++            print_freq=args.print_freq, pad=args.pad,
++            distributed=args.distributed, world_size=args.world_size,
++            transform=args.transform)
+ 
+         if epoch % args.eval_freq == 0:
+             # either create new objects or call reset on each metric obj
+@@ -227,12 +292,36 @@ def train_worker(gpu, ngpu_per_node, args, timers=None):
+ 
+             # best_metric is the metric used to compare results
+             # across different evaluation runs. It's modified in place.
++            # enable_eval_profiling = False
++            # if gpu >= 0:
++            #     use_cuda = True
++            # else:
++            #     use_cuda = False
++            # with torch.autograd.profiler.profile(enable_eval_profiling, use_cuda, True) as prof:
+             evaluate(rank=rank, gpu=gpu, task=args.task,
+-                     model=model, val_loader=val_loader,
+-                     metrics_reg=metrics_reg, metrics_cla=metrics_cla,
+-                     world_size=args.world_size, distributed=args.distributed,
+-                     best_metric=best_metric, pad=args.pad,
+-                     print_freq=args.print_freq, transform=args.transform)
++                    model=model, val_loader=val_loader,
++                    metrics_reg=metrics_reg, metrics_cla=metrics_cla,
++                    world_size=args.world_size, distributed=args.distributed,
++                    best_metric=best_metric, pad=args.pad,
++                    print_freq=args.print_freq, transform=args.transform)
++
++            # if enable_eval_profiling:
++            #     if use_cuda == True:
++            #         with open("profiler_out/Atacwork_cuda_evaluation.prof", "w") as prof_f:
++            #             prof_f.write(prof.key_averages().table(sort_by="cuda_time_total"))
++            #         with open("profiler_out/Atacwork_cuda_evaluation.nested.prof", "w") as prof_f:
++            #             prof_f.write(prof.nested_key_averages().table(sort_by="cuda_time_total")) 
++            #         with open("profiler_out/Atacwork_cuda_evaluation.toplevel.prof", "w") as prof_f:
++            #             prof_f.write(prof.nested_key_averages(only_top_level=True).table(sort_by="cuda_time_total"))
++            #         print_op_timings(prof, use_cuda, "profiler_out/")
++            #     else:
++            #         with open("profiler_out/Atacwork_cpu_evaluation_multi.prof", "w") as prof_f:
++            #             prof_f.write(prof.key_averages().table(sort_by="cpu_time_total"))
++            #         with open("profiler_out/Atacwork_cpu_evaluation_multi.nested.prof", "w") as prof_f:
++            #             prof_f.write(prof.nested_key_averages().table(sort_by="cpu_time_total")) 
++            #         with open("profiler_out/Atacwork_cpu_evaluation_multi.toplevel.prof", "w") as prof_f:
++            #             prof_f.write(prof.nested_key_averages(only_top_level=True).table(sort_by="cpu_time_total"))
++            #         print_op_timings(prof, use_cuda, "profiler_out/") 
+ 
+             if rank == 0:
+                 new_best = best_metric.better_than(current_best)
+@@ -263,7 +352,10 @@ def infer_worker(gpu, ngpu_per_node, args, res_queue=None):
+         res_queue : Inference queue.
+ 
+     """
+-    rank = gpu if args.distributed else 0
++    if gpu < 0:                                 # (Change)
++        rank = 0
++    else:
++        rank = gpu if args.distributed else 0
+ 
+     model, _ = get_model(args, gpu, rank)
+ 
+@@ -274,11 +366,18 @@ def infer_worker(gpu, ngpu_per_node, args, res_queue=None):
+         infer_sampler = torch.utils.data.distributed.DistributedSampler(
+             infer_dataset, shuffle=False)
+ 
+-    infer_loader = torch.utils.data.DataLoader(
+-        infer_dataset, batch_size=args.bs, shuffle=False,
+-        num_workers=args.num_workers, pin_memory=True, sampler=infer_sampler,
+-        drop_last=False
+-    )
++    if gpu < 0:                                     # (Change)
++        infer_loader = torch.utils.data.DataLoader(
++            infer_dataset, batch_size=args.bs, shuffle=False,
++            num_workers=args.num_workers, pin_memory=False, sampler=infer_sampler,
++            drop_last=False, worker_init_fn=worker_init_fn
++        )
++    else:
++        infer_loader = torch.utils.data.DataLoader(
++            infer_dataset, batch_size=args.bs, shuffle=False,
++            num_workers=args.num_workers, pin_memory=True, sampler=infer_sampler,
++            drop_last=False
++        )
+ 
+     infer(rank=rank, gpu=gpu, task=args.task, model=model,
+           infer_loader=infer_loader,
+@@ -296,7 +395,10 @@ def eval_worker(gpu, ngpu_per_node, args, res_queue=None):
+         res_queue : Evaluate queue.
+ 
+     """
+-    rank = gpu if args.distributed else 0
++    if gpu < 0:                             # (Change)
++        rank=0
++    else:
++        rank = gpu if args.distributed else 0
+ 
+     model, _ = get_model(args, gpu, rank)
+ 
+@@ -307,11 +409,18 @@ def eval_worker(gpu, ngpu_per_node, args, res_queue=None):
+         eval_sampler = torch.utils.data.distributed.DistributedSampler(
+             eval_dataset)
+ 
+-    eval_loader = torch.utils.data.DataLoader(
+-        eval_dataset, batch_size=args.bs, shuffle=False,
+-        num_workers=args.num_workers, pin_memory=True, sampler=eval_sampler,
+-        drop_last=False
+-    )
++    if gpu < 0:                             # (Change)
++        eval_loader = torch.utils.data.DataLoader(
++            eval_dataset, batch_size=args.bs, shuffle=False,
++            num_workers=args.num_workers, pin_memory=False, sampler=eval_sampler,
++            drop_last=False, worker_init_fn=worker_init_fn
++        )
++    else:
++        eval_loader = torch.utils.data.DataLoader(
++            eval_dataset, batch_size=args.bs, shuffle=False,
++            num_workers=args.num_workers, pin_memory=True, sampler=eval_sampler,
++            drop_last=False, 
++        )
+ 
+     metrics_reg, metrics_cla, best_metric = get_metrics(
+         args.task, args.threshold, args.best_metric_choice)
+diff --git a/tests/end-to-end/train.sh b/tests/end-to-end/train.sh
+index 953ee04..75a210c 100755
+--- a/tests/end-to-end/train.sh
++++ b/tests/end-to-end/train.sh
+@@ -24,3 +24,16 @@ python $root_dir/main.py train\
+     --width 50 --width_cla 50 --dil_cla 10 --pad 0
+ # Training is not deterministic, so we are not comparing results.
+ check_status $? "Training run not succesful!"
++
++echo ""
++echo "Test classification mode of training"
++echo ""
++python $root_dir/main.py train \
++    --files_train $out_dir/train_data.h5 \
++    --val_files $out_dir/val_data.h5 \
++    --model logistic --field 8401 \
++    --out_home $out_dir --label logistic \
++    --task classification --bs 4 \
++    --epochs 1 --pad 5000
++# Training is not deterministic, so we are not comparing results.
++check_status $? "Training run not succesful!"
+diff --git a/tutorials/tutorial1.md b/tutorials/tutorial1.md
+index b53f3ae..97dcea8 100644
+--- a/tutorials/tutorial1.md
++++ b/tutorials/tutorial1.md
+@@ -164,6 +164,8 @@ See [Tutorial 2](tutorial2.md) for step-by-step instructions on how to apply thi
+ 
+ To change any of the parameters for the deep learning model, you can edit the appropriate parameters in `configs/train_config.yaml` or `configs/model_structure.yaml` and run the command in step 7 above. Type `python $atacworks/scripts/main.py train --help` for an explanation of the parameters.
+ 
++Note: `train_config.yaml` is set up to use multiple GPUs. If you are using a single GPU, edit `train_config.yaml` to change the line `gpu: "None"` to read `gpu: 0`. 
++
+ ## References
+ (1) Lal, A., Chiang, Z.D., Yakovenko, N., Duarte, F.M., Israeli, J. and Buenrostro, J.D., 2019. AtacWorks: A deep convolutional neural network toolkit for epigenomics. BioRxiv, p.829481. (https://www.biorxiv.org/content/10.1101/829481v1)
+ 
+diff --git a/tutorials/tutorial2.md b/tutorials/tutorial2.md
+index a733e86..cedbb19 100644
+--- a/tutorials/tutorial2.md
++++ b/tutorials/tutorial2.md
+@@ -87,6 +87,7 @@ python $atacworks/scripts/main.py infer \
+     --config configs/infer_config.yaml \
+     --config_mparams configs/model_structure.yaml \
+ ```
++Note: `infer_config.yaml` is set up to use multiple GPUs. If you are using a single GPU, edit `infer_config.yaml` to change the line `gpu: "None"` to read `gpu: 0`. 
+ 
+ The inference results will be saved in the folder `output_latest`. This folder will contain four files: 
+ 1. `NK_inferred.track.bedGraph` 
+@@ -96,7 +97,7 @@ The inference results will be saved in the folder `output_latest`. This folder w
+ 
+ `NK_inferred.track.bedGraph` and `NK_inferred.track.bw` contain the denoised ATAC-seq track. `NK_inferred.peaks.bedGraph` and `NK_inferred.peaks.bw` contain the positions in the genome that are designated as peaks (the model predicts that the probability of these positions being part of a peak is at least 0.5)
+ 
+-To change any of the parameters for inference with the deep learning model, you can edit the parameters in `configs/infer_config.yaml` or `configs/model_structure.yaml` and run the commands in step 7-8 above. 
++To change any of the parameters for inference with the deep learning model, you can edit the parameters in `configs/infer_config.yaml` or `configs/model_structure.yaml` and run the command above. 
+ 
+ Type `python $atacworks/scripts/main.py infer --help` for an explanation of the parameters.
+ 

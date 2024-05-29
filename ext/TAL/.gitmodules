@@ -1,0 +1,6 @@
+[submodule "ext/safestringlib"]
+	path = ext/safestringlib
+	url = https://github.com/intel/safestringlib.git
+[submodule "ext/build-rmi/learned-systems-rmi"]
+	path = ext/build-rmi/learned-systems-rmi
+	url = https://github.com/learnedsystems/RMI.git
