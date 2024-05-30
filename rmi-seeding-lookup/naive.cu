@@ -260,7 +260,7 @@ int main(int argc, char *argv[]) {
   hipMalloc((void **) &deviceOutputNumHits, inputLength * sizeof(int));
   hipMalloc((void **) &deviceValuesEnc, inputLength * sizeof(uint64_t));
   hipMalloc((void **) &deviceSortedArray, n * sizeof(uint64_t));
-  hipMalloc((void **) &deviceL1Parameters, L1_SIZE * sizeof(double));
+  hipMalloc((void **) &deviceL1Parameters, L1_SIZE * 3 * sizeof(double));
 
   wbTime_stop(GPU, "Doing GPU memory allocation");
 
@@ -268,7 +268,7 @@ int main(int argc, char *argv[]) {
   hipMemcpy(deviceMinimizer, hostMinimizer, inputLength * sizeof(uint64_t), hipMemcpyHostToDevice);
   hipMemcpy(deviceValuesEnc, values_enc, inputLength * sizeof(uint64_t), hipMemcpyHostToDevice);
   hipMemcpy(deviceSortedArray, sorted_array, n * sizeof(uint64_t), hipMemcpyHostToDevice);
-  hipMemcpy(deviceL1Parameters, L1_PARAMETERS, L1_SIZE * sizeof(double), hipMemcpyHostToDevice);
+  hipMemcpy(deviceL1Parameters, L1_PARAMETERS, L1_SIZE * 3 * sizeof(double), hipMemcpyHostToDevice);
 
   wbTime_stop(Copy, "Copying data to the GPU");
 
@@ -277,8 +277,32 @@ int main(int argc, char *argv[]) {
   dim3 dimBlock(THREAD_SIZE, 1, 1);
 
   hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, deviceSortedArray, inputLength, n, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
+  hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, deviceSortedArray, inputLength, n, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
+  hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, deviceSortedArray, inputLength, n, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
+  hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, deviceSortedArray, inputLength, n, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
+  hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, deviceSortedArray, inputLength, n, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
 
   hipDeviceSynchronize();
+  
+  hipEvent_t start, stop;
+  hipEventCreate(&start);
+  hipEventCreate(&stop);
+  hipEventRecord(start, 0);
+  
+  int cycles = 100;
+  for (int i = 0; i < cycles; i++) {
+    hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, deviceSortedArray, inputLength, n, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
+  }
+  hipDeviceSynchronize();
+  hipEventRecord(stop, 0);
+  hipEventSynchronize(stop);
+  float milliseconds = 0;
+  hipEventElapsedTime(&milliseconds, start, stop);
+  std::cout << "Average elapsed time: " << milliseconds / cycles << " ms" << std::endl;
+
+  hipEventDestroy(start);
+  hipEventDestroy(stop);
+  
   wbTime_stop(Compute, "Doing the computation on the GPU");
 
   wbTime_start(Copy, "Copying data from the GPU");
