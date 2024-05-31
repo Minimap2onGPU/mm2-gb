@@ -1,6 +1,55 @@
+# New Feature: GPU-Optimized RMI-Based Seeding
+
+## Introduction
+In this work, we focused on the seeding step, trying to enhance mm2-fast’s performance by porting the RMI-based seeding from mm2-fast to GPUs, taking advantage of their parallel processing capabilities to improve speed and efficiency, integrating the GPU-optimized RMI-based seeding into the mm2-gb repository and evaluated its performance.
+## Hardware Specifications
+GPU: mm2-gb was tested on AMD Instinct™ MI100 GPU running ROCm-5.7.1
+## Installation 
+Clone the mm2-gb GitHub repo. Build the executable with a `make` command, specifying the debug level and GPU type at compile time:
+
+```
+git clone --recursive git@github.com:chenchiii/mm2-gb.git mm2-gb     
+cd mm2-gb
+
+# DEBUG levels:
+#   <empty>   : minimap2 prints only
+#   info      : print chaining kernel stats (except throughput in anchor pairs/s)
+#   analyze   : calculate kernel throughput in anchor pairs/s (requires additional device synchronization)
+#   verbose   : print kernel launch/debug information
+
+# Example:build for AMD GPUs with RMI-based seeding on CPU
+make GPU=AMD DEBUG=analyze lhash=1
+```
+To install the standalone kernel function:
+```sh
+cd rmi-seeding-lookup
+./build <name.cu> <name>
+```
+## Usage
+The usage of mm2-gb is similar to original mm2-gb. The `--gpu-chain` flag enables GPU chaining. `--gpu-cfg <filename.json>` specifies the GPU configuration json file. 
+## Profiling
+To profile the execution of mm2-gb using `rocprof`, use the following command:
+```
+rocprof --hip-trace ./minimap2 -t 1 --gpu-chain --gpu-cfg gpu/gpu_config.json test/MT-human.fa test/MT-orang.fa > mm2-gb_out.paf
+```
+## Performance
+Our GPU optimized ML-based seeding implementation has better performance compared to the mm2-gb on an AMD Instinct MI100. We observed a 30x increase in performance of lookup in the seeding step. 
+
+
+
+## Furture work
+- Merge our tested standalone GPU kernel functions to mm2-gb
+- Further optimization of GPU kernels with different strategies
+- Develop hybrid CPU-GPU architectures
+
+
+
+
+
 # mm2-gb
 mm2-gb is based on minimap2-v2.24 with GPU accelerated chaining kernel for high throughput accurate mapping of ultra-long reads. 
 ![mm2-workflow (1)](https://github.com/Minimap2onGPU/minimap2/assets/42312167/5ae47c34-a8e0-487a-9ebf-fc2bf7d30154)
+
 ## System Requirements
 OS: linux. tested on Ubuntu 20.04, Ubuntu 22.04
 
