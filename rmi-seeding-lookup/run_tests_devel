@@ -13,31 +13,13 @@
 
 # The application(s) to execute along with its input arguments and options:
 
-if [ "$#" -ne 1 ] && [ "$#" -ne 2 ]; then
+if [ "$#" -ne 1 ]; then
     echo "Usage: ./run_tests {program}"
-    echo "Usage: ./run_tests {program} {test_number}"
     exit 1
 fi
 
 export LD_LIBRARY_PATH=$PWD/libwb/build/:$LD_LIBRARY_PATH
 
 if [ "$#" -eq  1 ]; then
-    SCORE=0
-    TOTAL=0
-    for test in test/*; do
-        ((++TOTAL))
-        if diff <(./$1 -e $test/lisa_pos.dat -i $test/minimizer.dat -t vector | tail -1) <(echo The solution is correct) &>/dev/null; 
-        then
-            ((++SCORE))
-            echo "Passed $test!"
-        else
-            echo "$test is incorrect..."
-        fi
-    done
-
-    echo "$SCORE/$TOTAL tests passed"
-fi
-
-if [ "$#" -eq  2 ]; then
-    ./$1 -e test/$2/lisa_pos.dat -i test/$2/minimizer.dat -t vector
+    ./$1 -e test/mm2-fast_lisa_pos.dat -i test/mm2-fast_minimizer.dat -t vector
 fi

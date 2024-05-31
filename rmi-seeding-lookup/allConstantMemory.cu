@@ -336,6 +336,17 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  std::ofstream outfile1("./test/lisa_pos_all_constant_memory_result.dat");
+  std::ofstream outfile2("./test/num_hits_all_constant_memory_result.dat");
+  outfile1 << inputLength << std::endl;
+  outfile2 << inputLength << std::endl;
+  for (size_t i = 0; i < inputLength; i++) {
+      outfile1 << hostOutputLisaPos[i] << std::endl;
+      outfile2 << hostOutputNumHits[i] << std::endl;
+  }
+  outfile1.close();
+  outfile2.close();
+
   if (isResultCorrect) {
     printf("The solution is correct\n");
   } else {

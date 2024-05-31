@@ -12,8 +12,6 @@
     }                                                                     \
   } while (0)
 
-#define THREAD_SIZE 32
-
 enum query_state {
   GUESS_RMI_ROOT,
   GUESS_RMI_LEAF,
@@ -278,6 +276,17 @@ int main(int argc, char *argv[]) {
       break;
     }
   }
+
+  std::ofstream outfile1("./test/lisa_pos_cpu_result.dat");
+  std::ofstream outfile2("./test/num_hits_cpu_result.dat");
+  outfile1 << inputLength << std::endl;
+  outfile2 << inputLength << std::endl;
+  for (size_t i = 0; i < inputLength; i++) {
+      outfile1 << hostOutputLisaPos[i] << std::endl;
+      outfile2 << hostOutputNumHits[i] << std::endl;
+  }
+  outfile1.close();
+  outfile2.close();
 
   if (isResultCorrect) {
     printf("The solution is correct\n");

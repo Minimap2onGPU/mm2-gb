@@ -13,9 +13,6 @@
   } while (0)
 
 #define THREAD_SIZE 32
-#define SORTED_ARRAY_SIZE 3111
-
-__constant__ uint64_t sorted_array[SORTED_ARRAY_SIZE];
 
 enum query_state {
   GUESS_RMI_ROOT,
@@ -37,7 +34,7 @@ double L0_PARAMETER1 = 0.0;
 int64_t L1_SIZE = 0;
 double *L1_PARAMETERS;
 int64_t n = 0;
-uint64_t *sortedArray;
+uint64_t *sorted_array;
 
 uint64_t keys_size;
 uint64_t p_size;
@@ -53,7 +50,7 @@ bool loadRMI() {
     printf("%s file not found\n", filename.c_str());
     exit(0);
   }
-
+  
   infile.read((char *) &L0_PARAMETER0, sizeof(double));
   infile.read((char *) &L0_PARAMETER1, sizeof(double));
   infile.read((char *) &L1_SIZE, sizeof(int64_t));
@@ -88,9 +85,9 @@ bool loadSortedArray() {
   infile.read((char *) &n, sizeof(uint64_t));
   fprintf(stderr, "n = %ld\n", n);
 
-  sortedArray =(uint64_t*) malloc(n * sizeof(uint64_t));
+  sorted_array =(uint64_t*) malloc(n * sizeof(uint64_t));
   
-  infile.read((char*)sortedArray, n * sizeof(uint64_t));
+  infile.read((char*)sorted_array, n * sizeof(uint64_t));
 
   if (!infile.good()) {
     return false;
@@ -138,7 +135,6 @@ void loadResult(int64_t* lisa_pos, int* num_hits, int array_size) {
   file2.close();
 }
 
-
 __device__ int64_t clamp(double inp, double bound) {
   if (inp < 0.0) return 0;
   return (inp > bound ? bound : (size_t)inp);
@@ -151,16 +147,16 @@ __device__ int64_t getGuessRoot(uint64_t key, double l0Parameter0, double l0Para
   return modelIndex;
 }
 
-__device__ int64_t getGuessLeaf(uint64_t key, int64_t modelIndex, int64_t *err, double *l1Parameters) {
+__device__ int64_t getGuessLeaf(uint64_t key, int64_t modelIndex, int64_t *err, int64_t n, double *l1Parameters) {
   double fpred = fma(l1Parameters[modelIndex * 3 + 1], key, l1Parameters[modelIndex * 3]);
   
   *err = *((uint64_t*) (l1Parameters + (modelIndex * 3 + 2)));
   
-  int64_t guess = clamp(fpred, SORTED_ARRAY_SIZE - 1.0);
+  int64_t guess = clamp(fpred, n - 1.0);
   return guess;
 }
 
-__device__ void lastMileSearch(uint64_t key, int64_t &first, int64_t &m) {
+__device__ void lastMileSearch(uint64_t* sorted_array, uint64_t key, int64_t &first, int64_t &m) {
   int64_t half = m >> 1;
   int64_t middle = first + half;
   int64_t cond = (key >= sorted_array[middle]);
@@ -168,7 +164,7 @@ __device__ void lastMileSearch(uint64_t key, int64_t &first, int64_t &m) {
   m = (m - half) * cond + half * (1 - cond);
 }
 
-__device__ void rmiLookup(uint64_t *minimizers, int64_t *pos_array, int len, int i, double l0Parameter0, double l0Parameter1, int64_t l1Size, double *l1Parameters) {
+__device__ void rmiLookup(uint64_t *minimizers, int64_t *pos_array, uint64_t* sorted_array, int len, int i, int64_t n, double l0Parameter0, double l0Parameter1, int64_t l1Size, double *l1Parameters) {
   if (i < len) {
     BatchMetadata bm;
     bm.qid = i;
@@ -182,18 +178,18 @@ __device__ void rmiLookup(uint64_t *minimizers, int64_t *pos_array, int len, int
     
     // GUESS_RMI_LEAF
     int64_t err;
-    int64_t guess = getGuessLeaf(bm.key, bm.modelIndex, &err, l1Parameters);
+    int64_t guess = getGuessLeaf(bm.key, bm.modelIndex, &err, n, l1Parameters);
     bm.first = guess - err;
     if(bm.first < 0) bm.first = 0;
     int64_t last = guess + err + 1;
-    if(last > SORTED_ARRAY_SIZE) last = SORTED_ARRAY_SIZE;
+    if(last > n) last = n;
     bm.m = last - bm.first;
     bm.state = LAST_MILE;
     int64_t middle = bm.m >> 1;
 
     // LAST_MILE
     while (bm.m > 1) {
-      lastMileSearch(bm.key, bm.first, bm.m);
+      lastMileSearch(sorted_array, bm.key, bm.first, bm.m);
     }
     if (bm.m == 1) {
       pos = bm.first;
@@ -204,10 +200,10 @@ __device__ void rmiLookup(uint64_t *minimizers, int64_t *pos_array, int len, int
   }
 }
 
-__global__ void mmIdxGet(uint64_t *minimizers, int64_t *pos, int *num_hits, uint64_t* values_enc, int len, double l0Parameter0, double l0Parameter1, int64_t l1Size, double *l1Parameters) {
+__global__ void mmIdxGet(uint64_t *minimizers, int64_t *pos, int *num_hits, uint64_t* values_enc, uint64_t* sorted_array, int len, int64_t n, double l0Parameter0, double l0Parameter1, int64_t l1Size, double *l1Parameters) {
   int i = threadIdx.x + blockDim.x * blockIdx.x;
   
-  rmiLookup(minimizers, pos, len, i, l0Parameter0, l0Parameter1, l1Size, l1Parameters);
+  rmiLookup(minimizers, pos, sorted_array, len, i, n, l0Parameter0, l0Parameter1, l1Size, l1Parameters);
 
   if (i < len) {
     int p_i = pos[i];
@@ -233,6 +229,7 @@ int main(int argc, char *argv[]) {
   int64_t *deviceOutputLisaPos;
   int *deviceOutputNumHits;
   uint64_t *deviceValuesEnc;
+  uint64_t *deviceSortedArray;
   double *deviceL1Parameters;
 
   args = wbArg_read(argc, argv);
@@ -262,6 +259,7 @@ int main(int argc, char *argv[]) {
   hipMalloc((void **) &deviceOutputLisaPos, inputLength * sizeof(int64_t));
   hipMalloc((void **) &deviceOutputNumHits, inputLength * sizeof(int));
   hipMalloc((void **) &deviceValuesEnc, inputLength * sizeof(uint64_t));
+  hipMalloc((void **) &deviceSortedArray, n * sizeof(uint64_t));
   hipMalloc((void **) &deviceL1Parameters, L1_SIZE * 3 * sizeof(double));
 
   wbTime_stop(GPU, "Doing GPU memory allocation");
@@ -269,8 +267,8 @@ int main(int argc, char *argv[]) {
   wbTime_start(Copy, "Copying data to the GPU");
   hipMemcpy(deviceMinimizer, hostMinimizer, inputLength * sizeof(uint64_t), hipMemcpyHostToDevice);
   hipMemcpy(deviceValuesEnc, values_enc, inputLength * sizeof(uint64_t), hipMemcpyHostToDevice);
+  hipMemcpy(deviceSortedArray, sorted_array, n * sizeof(uint64_t), hipMemcpyHostToDevice);
   hipMemcpy(deviceL1Parameters, L1_PARAMETERS, L1_SIZE * 3 * sizeof(double), hipMemcpyHostToDevice);
-  hipMemcpyToSymbol(sorted_array, sortedArray, SORTED_ARRAY_SIZE * sizeof(uint64_t));
 
   wbTime_stop(Copy, "Copying data to the GPU");
 
@@ -278,11 +276,11 @@ int main(int argc, char *argv[]) {
   dim3 dimGrid(ceil(inputLength * 1.0 / THREAD_SIZE), 1, 1);
   dim3 dimBlock(THREAD_SIZE, 1, 1);
 
-  hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, inputLength, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
-  hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, inputLength, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
-  hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, inputLength, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
-  hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, inputLength, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
-  hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, inputLength, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
+  hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, deviceSortedArray, inputLength, n, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
+  hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, deviceSortedArray, inputLength, n, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
+  hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, deviceSortedArray, inputLength, n, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
+  hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, deviceSortedArray, inputLength, n, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
+  hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, deviceSortedArray, inputLength, n, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
 
   hipDeviceSynchronize();
   
@@ -290,10 +288,10 @@ int main(int argc, char *argv[]) {
   hipEventCreate(&start);
   hipEventCreate(&stop);
   hipEventRecord(start, 0);
-
+  
   int cycles = 100;
   for (int i = 0; i < cycles; i++) {
-    hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, inputLength, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
+    hipLaunchKernelGGL(mmIdxGet, dimGrid, dimBlock, 0, 0, deviceMinimizer, deviceOutputLisaPos, deviceOutputNumHits, deviceValuesEnc, deviceSortedArray, inputLength, n, L0_PARAMETER0, L0_PARAMETER1, L1_SIZE, deviceL1Parameters);
   }
   hipDeviceSynchronize();
   hipEventRecord(stop, 0);
@@ -304,7 +302,7 @@ int main(int argc, char *argv[]) {
 
   hipEventDestroy(start);
   hipEventDestroy(stop);
-
+  
   wbTime_stop(Compute, "Doing the computation on the GPU");
 
   wbTime_start(Copy, "Copying data from the GPU");
@@ -328,8 +326,8 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  std::ofstream outfile1("./test/lisa_pos_sorted_array_constant_memory_result.dat");
-  std::ofstream outfile2("./test/num_hits_sorted_array_constant_memory_result.dat");
+  std::ofstream outfile1("./test/lisa_pos_gpu_result.dat");
+  std::ofstream outfile2("./test/num_hits_gpu_result.dat");
   outfile1 << inputLength << std::endl;
   outfile2 << inputLength << std::endl;
   for (size_t i = 0; i < inputLength; i++) {
@@ -349,6 +347,7 @@ int main(int argc, char *argv[]) {
   hipFree(deviceOutputLisaPos);
   hipFree(deviceOutputNumHits);
   hipFree(deviceValuesEnc);
+  hipFree(deviceSortedArray);
   hipFree(deviceL1Parameters);
 
   free(hostMinimizer);
@@ -357,7 +356,7 @@ int main(int argc, char *argv[]) {
   free(hostOutputLisaPos);
   free(hostOutputNumHits);
   free(L1_PARAMETERS);
-  free(sortedArray);
+  free(sorted_array);
 
   return 0;
 }
