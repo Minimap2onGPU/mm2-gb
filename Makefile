@@ -4,8 +4,20 @@ CPPFLAGS=	-DHAVE_KALLOC -D__AMD_SPLIT_KERNELS__ # -Wno-unused-but-set-variable -
 CPPFLAGS+= 	$(if $(MAX_MICRO_BATCH),-DMAX_MICRO_BATCH=\($(MAX_MICRO_BATCH)\))
 INCLUDES=	-I .
 OBJS=		kthread.o kalloc.o misc.o bseq.o sketch.o sdust.o options.o index.o \
-			lchain.o align.o hit.o seed.o map.o format.o pe.o esterr.o splitidx.o \
+			lchain.o align.o hit.o map.o format.o pe.o esterr.o splitidx.o \
 			ksw2_ll_sse.o
+
+
+ifeq ($(USE_GPU),yes)
+OBJS += gpu/rmi_seed.o 
+else
+OBJS += seed.o
+endif
+
+USE_GPU ?= no
+
+
+
 # PROG=		minimap2-zerobranch-debug
 # PROG=		minimap2-nobalance-debug
 PROG=		minimap2$(SUFFIX)
