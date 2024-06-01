@@ -1,7 +1,9 @@
 # GPU-Optimized RMI-Based Seeding
 
 ## Introduction
-In this work, we focused on optimizing the seeding look up process. We aimed to improve the performance of mm2-gb by implementing the RMI-based seeding on GPUs, inspired by [mm2-fast](https://github.com/bwa-mem2/mm2-fast). By leveraging the parallel processing capabilities of GPU, our implementation aimed to significantly improve both speed and efficiency. Finally,  we integrated the GPU-optimized RMI-based seeding into the mm2-gb repository and conducted thorough performance evaluations.
+In this work, we focused on optimizing the seeding look-up process. We aimed to improve the performance of mm2-gb by implementing the RMI-based seeding on GPUs, inspired by [mm2-fast](https://github.com/bwa-mem2/mm2-fast). By leveraging the parallel processing capabilities of GPU, our implementation aimed to significantly improve both speed and efficiency. Finally,  we integrated the GPU-optimized RMI-based seeding into the mm2-gb repository and conducted thorough performance evaluations.
+![architecture](https://github.com/chenchiii/mm2-gb/assets/114895836/7f9908ee-62cb-4752-9bd7-52b13de8e8fa)
+
 ## Hardware Specifications
 GPU: mm2-gb was tested on AMD Instinct™ MI100 GPU running ROCm-5.7.1
 ## Installation
