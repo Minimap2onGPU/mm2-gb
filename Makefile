@@ -1,11 +1,47 @@
+OPT_FLAGS=-DALIGN_AVX -DAPPLY_AVX2
+OPT_FLAGS+= ${CHAIN_FLAG} 
+OPT_FLAGS+=$(COMP_FLAG)
 CFLAGS_NDEBUG = -DNDEBUG -O3 
-CDEBUG_FLAGS= -g -O2 #-Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -Wno-sign-compare -Wno-unused-function -Wno-c++17-extensions -Wno-\#warnings #-O0 -DNDEBUG
+CDEBUG_FLAGS= -g -Wall -O2 -Wc++-compat #-Wall -Wextra -Wno-unused-parameter -Wno-unused-variable -Wno-sign-compare -Wno-unused-function -Wno-c++17-extensions -Wno-\#warnings #-O0 -DNDEBUG
 CPPFLAGS=	-DHAVE_KALLOC -D__AMD_SPLIT_KERNELS__ # -Wno-unused-but-set-variable -Wno-unused-variable
 CPPFLAGS+= 	$(if $(MAX_MICRO_BATCH),-DMAX_MICRO_BATCH=\($(MAX_MICRO_BATCH)\))
-INCLUDES=	-I .
+COMP_FLAG = -march=native
+CHAIN_FLAG = -DPARALLEL_CHAINING
+
+
+ifneq ($(portable),)
+	STATIC_GCC=-static-libgcc -static-libstdc++
+endif 
+ifeq ($(CXX), icpc)
+	CC= icc
+else ifeq ($(CXX), g++)
+	CC=gcc
+endif	
+
+ifeq ($(lhash_index), 1)	
+	CPPFLAGS+=	-DLISA_INDEX 
+endif
+ifeq ($(lhash), 1)	
+	OPT_FLAGS+=	-DLISA_HASH -DUINT64 -DVECTORIZE 
+endif
+
+ifeq ($(manual_profile), 1)
+	CPPFLAGS+= -DMANUAL_PROFILING 
+endif
+
+ifeq ($(disable_output), 1)
+	CPPFLAGS+= -DDISABLE_OUTPUT
+endif
+
+ifeq ($(no_opt),)
+	CPPFLAGS+= $(OPT_FLAGS)
+endif
+
+
+INCLUDES=	-I . -I./ext/TAL/src/LISA-hash
 OBJS=		kthread.o kalloc.o misc.o bseq.o sketch.o sdust.o options.o index.o \
 			lchain.o align.o hit.o seed.o map.o format.o pe.o esterr.o splitidx.o \
-			ksw2_ll_sse.o
+			ksw2_ll_sse.o ./ext/TAL/src/LISA-hash/lisa_hash.o
 # PROG=		minimap2-zerobranch-debug
 # PROG=		minimap2-nobalance-debug
 PROG=		minimap2$(SUFFIX)
@@ -160,3 +196,4 @@ sdust.o: kalloc.h kdq.h kvec.h sdust.h
 seed.o: mmpriv.h minimap.h bseq.h kseq.h kalloc.h ksort.h
 sketch.o: kvec.h kalloc.h mmpriv.h minimap.h bseq.h kseq.h
 splitidx.o: mmpriv.h minimap.h bseq.h kseq.h
+./ext/TAL/src/LISA-hash/lisa_hash.o: ./ext/TAL/src/LISA-hash/lisa_hash.h

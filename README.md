@@ -1,6 +1,68 @@
+# GPU-Optimized RMI-Based Seeding
+
+## Introduction
+In this work, we focused on optimizing the seeding look-up process. We aimed to improve the performance of mm2-gb by implementing the RMI-based seeding on GPUs, inspired by [mm2-fast](https://github.com/bwa-mem2/mm2-fast). By leveraging the parallel processing capabilities of GPU, our implementation aimed to significantly improve both speed and efficiency. Finally,  we integrated the GPU-optimized RMI-based seeding into the mm2-gb repository and conducted thorough performance evaluations.
+![architecture](https://github.com/chenchiii/mm2-gb/assets/114895836/7f9908ee-62cb-4752-9bd7-52b13de8e8fa)
+
+## Hardware Specifications
+GPU: mm2-gb was tested on AMD Instinct™ MI100 GPU running ROCm-5.7.1
+## Installation
+### mm2-gb Integration
+1. Clone the mm2-gb GitHub repo.
+```
+git clone --recursive git@github.com:chenchiii/mm2-gb.git mm2-gb     
+cd mm2-gb
+```
+2. Build the executable using the `make` command, specifying the debug level and GPU type at compile time:
+```
+# DEBUG levels:
+#   <empty>   : minimap2 prints only
+#   info      : print chaining kernel stats (except throughput in anchor pairs/s)
+#   analyze   : calculate kernel throughput in anchor pairs/s (requires additional device synchronization)
+#   verbose   : print kernel launch/debug information
+
+# Example:build for AMD GPUs with RMI-based seeding on CPU
+make GPU=AMD DEBUG=analyze lhash=1
+```
+### Standalone Seeding Lookup Process
+To install the standalone kernel function, follow these steps:
+1. Navigate to the rmi-seeding-lookup directory:
+```sh
+cd rmi-seeding-lookup
+```
+2. Build the kernel function using the provided build script:
+```sh
+./build <implementation.cu> <name>
+```
+3. Run the test for the installed kernel function:
+```sh
+./run_test <name>
+```
+For a more detailed description, refer to the [README.md](https://github.com/chenchiii/mm2-gb/tree/gpu_kernel/rmi-seeding-lookup) in the rmi-seeding-lookup directory.
+## Usage
+The usage of mm2-gb is similar to original mm2-gb. Command0line flags includes:
+- `--gpu-chain` flag enables GPU chaining.
+- `--gpu-cfg <filename.json>` specifies the GPU configuration json file. 
+## Profiling
+To profile the execution of mm2-gb using `rocprof`, use the following command:
+```
+rocprof --hip-trace ./minimap2 -t 1 --gpu-chain --gpu-cfg gpu/gpu_config.json test/MT-human.fa test/MT-orang.fa > mm2-gb_out.paf
+```
+## Performance
+Our GPU optimized ML-based seeding implementation demonstrates better performance compared to mm2-gb on an AMD Instinct MI100. Specifically, we observed a 30x increase in performance of lookup in the seeding step.  
+
+## Furture work
+- Merge our tested standalone GPU kernel functions to mm2-gb
+- Further optimization of GPU kernels with different strategies
+- Develop hybrid CPU-GPU architectures
+
+--------------------------------------------------------------------------------------------------
+## The original README contents of mm2-gb follow.
+
 # mm2-gb
 mm2-gb is based on minimap2-v2.24 with GPU accelerated chaining kernel for high throughput accurate mapping of ultra-long reads. 
 ![mm2-workflow (1)](https://github.com/Minimap2onGPU/minimap2/assets/42312167/5ae47c34-a8e0-487a-9ebf-fc2bf7d30154)
+
 ## System Requirements
 OS: linux. tested on Ubuntu 20.04, Ubuntu 22.04
 
