@@ -837,7 +837,7 @@ typedef struct {
 void mm_consolidate_timers(step_t *s, pipeline_t *p)
 {
 	// TODO: disabled for sysbio submission
-	return;
+	// return;
 	mm_time_seed_min = 0;
     mm_time_chain_min = 0;
     mm_time_align_min = 0;
