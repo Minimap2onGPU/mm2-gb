@@ -15,7 +15,7 @@ struct mm_tbuf_s {
 	int rep_len, frag_gap; // updated per read. 
 	double timers[MM_N_THR_TIMERS];
 }; // per thread
-#define __AMD_SPLIT_KERNELS__ 1
+
 #if defined(__AMD_SPLIT_KERNELS__)
 
 #include "plutils.h"
