@@ -15,7 +15,7 @@ struct mm_tbuf_s {
 	int rep_len, frag_gap; // updated per read. 
 	double timers[MM_N_THR_TIMERS];
 }; // per thread
-
+#define __AMD_SPLIT_KERNELS__ 1
 #if defined(__AMD_SPLIT_KERNELS__)
 
 #include "plutils.h"
@@ -824,6 +824,7 @@ typedef struct {
 	mm_tbuf_t **buf;
 #if defined(__AMD_SPLIT_KERNELS__)
     mm_trbuf_t **trbuf;
+	// mm_batch_trbuf_t **batchbuf; // to store each read for read, chain, align
 	int batch_max_reads;
     size_t batch_max_anchors;
     int gpu_min_n;
@@ -921,6 +922,181 @@ void mm_trbuf_is_full(mm_trbuf_t* tr, step_t *s){
     }
 }
 
+//// new structure ////
+
+static void seed(step_t *s, mm_trbuf_t *tr, mm_tbuf_t *b, int tid, long i);
+static void chain(step_t *s, mm_trbuf_t *tr, mm_tbuf_t *b, int tid, long i);
+static void align(step_t *s, mm_trbuf_t *tr, mm_tbuf_t *b, int tid, long i);
+
+// TODO: work on processing all n before moving on instead of n_threads each time this is called
+// NOTE: seed, chain and align only use tr->acc_batch for now
+void seed_chain_align_tmp(void *data, long iteration, int num_threads, long n){
+	omp_set_num_threads(num_threads);
+	step_t *s = (step_t *)data;
+	#pragma omp parallel shared(s, iteration, num_threads, n) 
+	{
+		int tid = omp_get_thread_num();
+		long i = iteration * num_threads + tid; // note may exceed n reads
+		mm_tbuf_t *b = s->buf[tid];
+		mm_trbuf_t *tr = s->trbuf[tid];
+		long j;
+		#pragma omp for
+		for (j = 0; j < num_threads; ++j){
+			if(i < n)
+				seed(s, tr, b, j, i);
+		}
+		#pragma omp barrier
+		#pragma omp for 
+		for (j = 0; j < num_threads; ++j){
+			if(i < n)
+				chain(s, tr, b, j, i);
+		}
+		#pragma omp barrier
+		#pragma omp for 
+		for (j = 0; j < num_threads; ++j){
+			if(i < n)
+				align(s, tr, b, j, i);
+		}
+	}
+}
+
+static void seed(step_t *s, mm_trbuf_t *tr, mm_tbuf_t *b, int tid, long i){
+	int off = s->seg_off[i];
+	int j, pe_ori = s->p->opt->pe_ori;
+
+	assert(s->n_seg[i] <= MM_MAX_SEG);
+	if (mm_dbg_flag & MM_DBG_PRINT_QNAME) {
+		fprintf(stderr, "QR\t%s\t%d\t%d\n", s->seq[off].name, tid, s->seq[off].l_seq);
+		double t = realtime(); // TODO: this t doesn't do anything
+	}
+
+	int n_indep_reads = (s->p->opt->flag & MM_F_INDEPEND_SEG) ? s->n_seg[i] : 1;
+	void *km;
+	chain_read_t *read_ptr = tr->acc_batch.reads;
+	tr->acc_batch.count = n_indep_reads;
+	km = tr->acc_batch.km;
+
+	if (s->p->opt->flag & MM_F_INDEPEND_SEG) { // assign to different chain_read_t if segments are indepent
+		for (j = 0; j < s->n_seg[i]; ++j) {
+			read_ptr->qlens = (int *)kmalloc(km, sizeof(int));
+			read_ptr->qseqs = (const char **)kmalloc(km, sizeof(const char *));
+			if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori>>1&1)) || (j == 1 && (pe_ori&1))))
+				mm_revcomp_bseq(&s->seq[off + j]);
+			read_ptr->qlens[0] = s->seq[off + j].l_seq;
+			read_ptr->qseqs[0] = s->seq[off + j].seq;
+			read_ptr->n_seg = 1;
+
+			read_ptr->seq.i = i;
+			read_ptr->seq.seg_id = j;
+			strcpy(read_ptr->seq.name, s->seq[off + j].name);
+			read_ptr->seq.n_alt = s->p->mi->n_alt;
+			read_ptr->seq.is_alt = 0;
+
+			read_ptr++;
+		}
+
+	} else {
+		read_ptr->qlens = (int *)kmalloc(km, s->n_seg[i] * sizeof(int));
+		read_ptr->qseqs = (const char **)kmalloc(km, s->n_seg[i] * sizeof(const char *));
+		read_ptr->n_seg = s->n_seg[i];
+		for (j = 0; j < s->n_seg[i]; ++j) {
+			if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori>>1&1)) || (j == 1 && (pe_ori&1))))
+				mm_revcomp_bseq(&s->seq[off + j]);
+			read_ptr->qlens[j] = s->seq[off + j].l_seq;
+			read_ptr->qseqs[j] = s->seq[off + j].seq;
+		}
+
+		read_ptr->seq.i = i;
+		read_ptr->seq.seg_id = 0;
+		strcpy(read_ptr->seq.name, s->seq[off].name);
+		read_ptr->seq.n_alt = s->p->mi->n_alt;
+		read_ptr->seq.is_alt = 0;
+
+		read_ptr++;
+	}
+	
+
+	// Seed
+	for (j = 0; j < n_indep_reads; j++) {
+		read_ptr--;
+		mm_map_seed(s->p->mi, s->p->opt, read_ptr, b, km);
+		tr->acc_batch.total_n += read_ptr->n;
+		assert(read_ptr->n_mini_pos >= 0);
+	}
+
+	assert(tr->acc_batch.total_n <= s->batch_max_anchors);
+}
+
+
+static void chain(step_t *s, mm_trbuf_t *tr, mm_tbuf_t *b, int tid, long i){
+	int iread;
+	double t1 = realtime();		
+	// cpu kernel
+	for (iread=0; iread<tr->acc_batch.count; iread++) {
+		mm_map_chain(s->p->mi, s->p->opt, &tr->acc_batch.reads[iread], b, tr->acc_batch.km);
+	}
+	b->timers[MM_TIME_CHAIN] += realtime() - t1;
+}
+
+static void align(step_t *s, mm_trbuf_t *tr, mm_tbuf_t *b, int tid, long i){
+	mm_batch_trbuf_t *batch = &tr->acc_batch;
+	int j, iread, off, pe_ori = s->p->opt->pe_ori;
+	/* Copy rep_len & frag_gap to step_t */
+	for (iread = 0; iread < batch->count; iread++) {
+		i = batch->reads[iread].seq.i;
+		j = batch->reads[iread].seq.seg_id;
+		off = s->seg_off[i] + j;
+		for (int k = 0; k < batch->reads[iread].n_seg; k++) {
+			s->rep_len[off + k] = batch->reads[iread].rep_len;
+			s->frag_gap[off + k] = batch->reads[iread].frag_gap;
+		}
+	}
+	// Align
+	for (iread = 0; iread < batch->count; iread++) {
+		i = batch->reads[iread].seq.i;
+		off = s->seg_off[i];
+		j = batch->reads[iread].seq.seg_id;
+		mm_map_align(s->p->mi, s->p->opt, &batch->reads[iread], &s->reg[off + j], &s->n_reg[off + j], b, batch->km) ;
+		if (s->p->opt->flag & MM_F_INDEPEND_SEG) {
+			if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori >> 1 & 1)) ||
+										(j == 1 && (pe_ori & 1)))) {
+				int k, t;
+				mm_revcomp_bseq(&s->seq[off + j]);
+				for (k = 0; k < s->n_reg[off + j]; ++k) {
+					mm_reg1_t *r = &s->reg[off + j][k];
+					t = r->qs;
+					r->qs = batch->reads[iread].qlens[j] - r->qe;
+					r->qe = batch->reads[iread].qlens[j] - t;
+					r->rev = !r->rev;
+				}
+			}
+		} else {
+			for (j = 0; j < batch->reads[iread].n_seg;
+					++j) {  // flip the query strand and coordinate to the
+							// original read strand
+				if (s->n_seg[i] == 2 &&
+					((j == 0 && (pe_ori >> 1 & 1)) ||
+						(j == 1 && (pe_ori & 1)))) {
+					int k, t;
+					mm_revcomp_bseq(&s->seq[off + j]);
+					for (k = 0; k < s->n_reg[off + j]; ++k) {
+						mm_reg1_t *r = &s->reg[off + j][k];
+						t = r->qs;
+						r->qs = batch->reads[iread].qlens[j] - r->qe;
+						r->qe = batch->reads[iread].qlens[j] - t;
+						r->rev = !r->rev;
+					}
+				}
+			}
+		}
+		if (mm_dbg_flag & MM_DBG_PRINT_QNAME)
+			fprintf(stderr, "QT\t%s\t%d\t%.6f\n", s->seq[off].name, tid, realtime()); // TODO: realtime() - t to get accurate time
+	}
+	mm_trbuf_batch_reset(batch, s->batch_max_reads, s->p->opt);
+}
+
+///////////////////////
+	
 static void worker_for(void *_data, long i_in, int tid) // kt_for() callback
 {
     step_t *s = (step_t *)_data;
@@ -1320,7 +1496,8 @@ static void *worker_pipeline(void *shared, int step, void *in)
             s->trbuf[i] = mm_trbuf_init(s->batch_max_reads, p->opt);
 #endif
 		if (p->n_parts > 0) merge_hits((step_t*)in);
-		else kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
+		//else kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
+		else kt_for(p->n_threads, seed_chain_align_tmp, in, ((step_t*)in)->n_frag);
 		return in;
     } else if (step == 2) { // step 2: output
 		void *km = 0;
