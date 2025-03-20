@@ -9,7 +9,7 @@
 #include "mmpriv.h"
 #include "bseq.h"
 #include "khash.h"
-
+#include <math.h>
 struct mm_tbuf_s {
 	void *km;
 	int rep_len, frag_gap; // updated per read. 
@@ -20,7 +20,8 @@ struct mm_tbuf_s {
 
 #include "plutils.h"
 
-#define N_ACCUM 64
+#define N_ACCUM 64 // number of reads a batch can accumulate
+#define EXTRA_BATCHES 10 
 
 typedef struct{
     int batchid;
@@ -28,20 +29,7 @@ typedef struct{
     int count;			// number of reads in the batch
     size_t total_n;		// total number of anchors in the batch
     chain_read_t *reads;
-} mm_batch_trbuf_t;
-
-// local variables required for each read processed by a CPU thread
-typedef struct {
-    mm_batch_trbuf_t acc_batch;
-    int is_full;
-
-    mm_batch_trbuf_t launched_batch;
-    int has_launched;
-
-    mm_batch_trbuf_t pending_batch;
-    int is_pending;
-
-} mm_trbuf_t;  // per thread
+} mm_batch_buf_t;
 
 #endif
 
@@ -66,7 +54,10 @@ void *mm_tbuf_get_km(mm_tbuf_t *b)
 }
 
 #if defined(__AMD_SPLIT_KERNELS__)
-void mm_trbuf_batch_init(mm_batch_trbuf_t *batch_, int batch_max_reads) {
+/**
+ * Init memory for a batch
+ */
+void mm_batch_init(mm_batch_buf_t *batch_, int batch_max_reads) {
     batch_->count = 0;
     batch_->total_n = 0;
     batch_->reads = (chain_read_t *)malloc(sizeof(chain_read_t) * batch_max_reads);
@@ -75,38 +66,8 @@ void mm_trbuf_batch_init(mm_batch_trbuf_t *batch_, int batch_max_reads) {
     batch_->km = km_init();
 }
 
-void mm_trbuf_batch_reset(mm_batch_trbuf_t *batch_, int batch_max_reads, const mm_mapopt_t *opt) {
-	// free all the reads in the batch
-    for (int i = 0; i < batch_->count; i++) {
-        free_read(&batch_->reads[i], batch_->km);
-    }
 
-
-
-	/* reset memory pool km */
-    km_stat_t kmst;
-    if (batch_->km) {
-        chain_read_t *last_read = batch_->reads + batch_->count;
-        km_stat(batch_->km, &kmst);
-		if (mm_dbg_flag & MM_DBG_PRINT_QNAME)
-			fprintf(stderr, "QM\t%s\t%d\tBid=%d\tcap=%ld,avail=%ld,nCore=%ld,largest=%ld\n", 
-			last_read->seq.name, last_read->seq.qlen_sum, batch_->batchid, kmst.capacity, kmst.available, kmst.n_cores, kmst.largest);
-		assert(kmst.n_blocks == kmst.n_cores); // otherwise, there is a memory leak
-        assert(kmst.capacity == kmst.meta_size + kmst.available);
-        if (kmst.largest > 1U<<28 || (opt->cap_kalloc > 0 && kmst.capacity > opt->cap_kalloc)) {
-			if (mm_dbg_flag & MM_DBG_PRINT_QNAME)
-				fprintf(stderr, "[W::%s] reset thread-local memory after read %s\n", __func__, last_read->seq.name);
-			km_destroy(batch_->km);
-            batch_->km = km_init();
-        }
-    }
-
-    batch_->count = 0;
-    batch_->total_n = 0;
-    batch_->batchid = -1;
-}
-
-void mm_trbuf_batch_destroy(mm_batch_trbuf_t *batch_){
+void mm_batch_destroy(mm_batch_buf_t *batch_){
 	// free reads in the batch
     for (int i = 0; i < batch_->count; i++){
         free_read(&batch_->reads[i], batch_->km);
@@ -128,32 +89,6 @@ void mm_trbuf_batch_destroy(mm_batch_trbuf_t *batch_){
     }
     free(batch_->reads);
     batch_->reads = 0;
-}
-
-
-mm_trbuf_t *mm_trbuf_init(const int batch_max_reads, const mm_mapopt_t *opt)
-{
-    mm_trbuf_t *tr;
-    tr = (mm_trbuf_t *)calloc(1, sizeof(mm_trbuf_t));
-	tr->is_full = 0;
-    tr->is_pending = 0;
-    tr->has_launched = 0;
-    mm_trbuf_batch_init(&tr->acc_batch, batch_max_reads);
-    tr->acc_batch.batchid = 0;
-    mm_trbuf_batch_init(&tr->pending_batch, batch_max_reads);
-    tr->pending_batch.batchid = 1;
-    mm_trbuf_batch_init(&tr->launched_batch, batch_max_reads);
-    tr->launched_batch.batchid = 2;
-    return tr;
-}
-
-void mm_trbuf_destroy(mm_trbuf_t *tr)
-{
-    if (tr == 0) return;
-    mm_trbuf_batch_destroy(&tr->acc_batch);
-    mm_trbuf_batch_destroy(&tr->pending_batch);
-    mm_trbuf_batch_destroy(&tr->launched_batch);
-    free(tr);
 }
 #endif
 
@@ -821,16 +756,231 @@ typedef struct {
 	mm_bseq1_t *seq;
 	int *n_reg, *seg_off, *n_seg, *rep_len, *frag_gap;
 	mm_reg1_t **reg;
-	mm_tbuf_t **buf;
+	
 #if defined(__AMD_SPLIT_KERNELS__)
-    mm_trbuf_t **trbuf;
-	// mm_batch_trbuf_t **batchbuf; // to store each read for read, chain, align
+	mm_tbuf_t *buf;
 	int batch_max_reads;
-    size_t batch_max_anchors;
+	int num_batches_reserved; // number of batches allocated
+	int batches_index;
     int gpu_min_n;
+	mm_batch_buf_t *batches;
+	size_t batch_max_anchors;
+#else
+	mm_tbuf_t **buf;
 #endif
 } step_t;
 
+
+#if defined(__AMD_SPLIT_KERNELS__)
+
+/**
+ * EFFECT: Move extra reads from <batch> to <next_batch> if exceed max_anchors
+ * RETURNS: true if batch is full
+ */
+bool mm_is_batch_full(mm_batch_buf_t* batch, mm_batch_buf_t* next_batch, step_t *s){
+	bool is_full = false;
+	while (batch->total_n > s->batch_max_anchors) { // if the batch is full
+		// move last read from acc_batch to pending batch (another memory poll)
+        chain_read_t *read_ptr_curr_batch = &batch->reads[batch->count - 1];
+        chain_read_t *read_ptr_next_batch = &next_batch->reads[next_batch->count];
+		/* deep copy, with memory pool transaction*/
+        *read_ptr_next_batch = *read_ptr_curr_batch;
+        if (s->p->opt->flag & MM_F_INDEPEND_SEG) {
+            read_ptr_next_batch->qlens = (int *)kmalloc(next_batch->km, sizeof(int));
+            read_ptr_next_batch->qseqs = (const char **)kmalloc(next_batch->km, sizeof(const char*));
+            read_ptr_next_batch->qlens[0] = read_ptr_curr_batch->qlens[0];
+            read_ptr_next_batch->qseqs[0] = read_ptr_curr_batch->qseqs[0];
+        } else {
+            read_ptr_next_batch->qlens = (int *)kmalloc(next_batch->km, sizeof(int)*read_ptr_curr_batch->n_seg);
+            read_ptr_next_batch->qseqs = (const char **)kmalloc(next_batch->km, sizeof(const char*)*read_ptr_curr_batch->n_seg);
+            memcpy(read_ptr_next_batch->qlens,  read_ptr_curr_batch->qlens, sizeof(int)*read_ptr_curr_batch->n_seg);
+            memcpy(read_ptr_next_batch->qseqs, read_ptr_curr_batch->qseqs, sizeof(const char*)*read_ptr_curr_batch->n_seg);
+        }
+        read_ptr_next_batch->mini_pos = (uint64_t*)kmalloc(next_batch->km, read_ptr_curr_batch->n_mini_pos * sizeof(uint64_t));
+		read_ptr_next_batch->a = (mm128_t*)kmalloc(next_batch->km, read_ptr_curr_batch->n * sizeof(mm128_t));
+        memcpy(read_ptr_next_batch->mini_pos, read_ptr_curr_batch->mini_pos, read_ptr_curr_batch->n_mini_pos * sizeof(uint64_t));
+        memcpy(read_ptr_next_batch->a, read_ptr_curr_batch->a, read_ptr_curr_batch->n * sizeof(mm128_t));
+        strcpy(read_ptr_next_batch->seq.name, read_ptr_curr_batch->seq.name);
+        next_batch->count++;
+        next_batch->total_n += read_ptr_curr_batch->n;
+
+        // remove read from acc_batch
+        batch->count--;
+        batch->total_n -= read_ptr_curr_batch->n;
+        kfree(batch->km, read_ptr_curr_batch->mini_pos);
+        kfree(batch->km, read_ptr_curr_batch->a);
+        kfree(batch->km, read_ptr_curr_batch->qlens);
+        kfree(batch->km, read_ptr_curr_batch->qseqs);
+		is_full = true;
+    }
+	return is_full;
+}
+
+static void seed(step_t *s, mm_batch_buf_t* batches, mm_tbuf_t *b, long i, int* batch_num);
+static void chain(step_t *s, mm_batch_buf_t *batch, mm_tbuf_t *b);
+static void align(step_t *s, mm_batch_buf_t *batch, mm_tbuf_t *b);
+
+/**
+ * EFFECT: seed <n> reads before chaining and aligning batches generated
+ */
+void seed_chain_align(int num_threads, void *data, long n){
+	omp_set_num_threads(num_threads);
+	step_t *s = (step_t *)data;
+	long i;
+	s->batches_index = 0;
+	int j;
+	mm_tbuf_t *b = s->buf;
+	mm_batch_buf_t *batches = s->batches;
+	#pragma omp parallel for // TODO: parallelize batching this (km shared, cannot simply multithread)
+	for (i = 0; i < n; ++i){
+		seed(s, batches, b, i, &s->batches_index);
+	}
+	// NOTE: since batches store independent blocks of memory for reads, thread can operate on any 2 distinct batches tgt
+	#pragma omp parallel for
+	for(j = 0; j <= s->batches_index; ++j){
+		chain(s, &batches[j], b);
+	}
+	#pragma omp parallel for
+	for(j = 0; j <= s->batches_index; ++j){
+		align(s, &batches[j], b);
+	}
+}
+
+static void seed(step_t *s, mm_batch_buf_t* batches, mm_tbuf_t *b, long i, int* batch_num){
+	int off = s->seg_off[i];
+	int j, pe_ori = s->p->opt->pe_ori;
+
+	assert(s->n_seg[i] <= MM_MAX_SEG);
+
+	int n_indep_reads = (s->p->opt->flag & MM_F_INDEPEND_SEG) ? s->n_seg[i] : 1;
+	mm_batch_buf_t *batch = &batches[*batch_num];
+	if (n_indep_reads + batch->count > s->batch_max_reads){
+		(*batch_num)++;
+		batch = &batches[*batch_num]; // move to the next batch in buffer
+	}
+	chain_read_t *read_ptr = batch->reads + batch->count;
+	batch->count += n_indep_reads;
+	void *km = batch->km;
+
+	if (s->p->opt->flag & MM_F_INDEPEND_SEG) { // assign to different chain_read_t if segments are indepent
+		for (j = 0; j < s->n_seg[i]; ++j) {
+			read_ptr->qlens = (int *)kmalloc(km, sizeof(int));
+			read_ptr->qseqs = (const char **)kmalloc(km, sizeof(const char *));
+			if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori>>1&1)) || (j == 1 && (pe_ori&1))))
+				mm_revcomp_bseq(&s->seq[off + j]);
+			read_ptr->qlens[0] = s->seq[off + j].l_seq;
+			read_ptr->qseqs[0] = s->seq[off + j].seq;
+			read_ptr->n_seg = 1;
+
+			read_ptr->seq.i = i;
+			read_ptr->seq.seg_id = j;
+			strcpy(read_ptr->seq.name, s->seq[off + j].name);
+			read_ptr->seq.n_alt = s->p->mi->n_alt;
+			read_ptr->seq.is_alt = 0;
+
+			read_ptr++;
+		}
+
+	} else {
+		read_ptr->qlens = (int *)kmalloc(km, s->n_seg[i] * sizeof(int));
+		read_ptr->qseqs = (const char **)kmalloc(km, s->n_seg[i] * sizeof(const char *));
+		read_ptr->n_seg = s->n_seg[i];
+		for (j = 0; j < s->n_seg[i]; ++j) {
+			if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori>>1&1)) || (j == 1 && (pe_ori&1))))
+				mm_revcomp_bseq(&s->seq[off + j]);
+			read_ptr->qlens[j] = s->seq[off + j].l_seq;
+			read_ptr->qseqs[j] = s->seq[off + j].seq;
+		}
+
+		read_ptr->seq.i = i;
+		read_ptr->seq.seg_id = 0;
+		strcpy(read_ptr->seq.name, s->seq[off].name);
+		read_ptr->seq.n_alt = s->p->mi->n_alt;
+		read_ptr->seq.is_alt = 0;
+
+		read_ptr++;
+	}
+	
+
+	// Seed
+	for (j = 0; j < n_indep_reads; j++) {
+		read_ptr--;
+		mm_map_seed(s->p->mi, s->p->opt, read_ptr, b, km);
+		batch->total_n += read_ptr->n;
+		assert(read_ptr->n_mini_pos >= 0);
+	}
+
+	// check if full
+	bool is_full = mm_is_batch_full(batch, &batches[(*batch_num) + 1], s);
+	if(is_full) *batch_num++; // move to next batch
+}
+
+static void chain(step_t *s, mm_batch_buf_t *batch, mm_tbuf_t *b){
+	int iread;
+	double t1 = realtime();		
+	// cpu kernel
+	for (iread=0; iread<batch->count; iread++) {
+		mm_map_chain(s->p->mi, s->p->opt, &batch->reads[iread], b, batch->km);
+	}
+	b->timers[MM_TIME_CHAIN] += realtime() - t1;
+}
+
+static void align(step_t *s, mm_batch_buf_t *batch, mm_tbuf_t *b){
+	int j, iread, off, pe_ori = s->p->opt->pe_ori;
+	long i;
+	/* Copy rep_len & frag_gap to step_t */
+	for (iread = 0; iread < batch->count; iread++) {
+		i = batch->reads[iread].seq.i;
+		j = batch->reads[iread].seq.seg_id;
+		off = s->seg_off[i] + j;
+		for (int k = 0; k < batch->reads[iread].n_seg; k++) {
+			s->rep_len[off + k] = batch->reads[iread].rep_len;
+			s->frag_gap[off + k] = batch->reads[iread].frag_gap;
+		}
+	}
+	// Align
+	for (iread = 0; iread < batch->count; iread++) {
+		i = batch->reads[iread].seq.i;
+		off = s->seg_off[i];
+		j = batch->reads[iread].seq.seg_id;
+		mm_map_align(s->p->mi, s->p->opt, &batch->reads[iread], &s->reg[off + j], &s->n_reg[off + j], b, batch->km) ;
+		if (s->p->opt->flag & MM_F_INDEPEND_SEG) {
+			if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori >> 1 & 1)) ||
+										(j == 1 && (pe_ori & 1)))) {
+				int k, t;
+				mm_revcomp_bseq(&s->seq[off + j]);
+				for (k = 0; k < s->n_reg[off + j]; ++k) {
+					mm_reg1_t *r = &s->reg[off + j][k];
+					t = r->qs;
+					r->qs = batch->reads[iread].qlens[j] - r->qe;
+					r->qe = batch->reads[iread].qlens[j] - t;
+					r->rev = !r->rev;
+				}
+			}
+		} else {
+			for (j = 0; j < batch->reads[iread].n_seg;
+					++j) {  // flip the query strand and coordinate to the
+							// original read strand
+				if (s->n_seg[i] == 2 &&
+					((j == 0 && (pe_ori >> 1 & 1)) ||
+						(j == 1 && (pe_ori & 1)))) {
+					int k, t;
+					mm_revcomp_bseq(&s->seq[off + j]);
+					for (k = 0; k < s->n_reg[off + j]; ++k) {
+						mm_reg1_t *r = &s->reg[off + j][k];
+						t = r->qs;
+						r->qs = batch->reads[iread].qlens[j] - r->qe;
+						r->qe = batch->reads[iread].qlens[j] - t;
+						r->rev = !r->rev;
+					}
+				}
+			}
+		}
+	}
+}
+#endif
+
+#ifndef __AMD_SPLIT_KERNELS__
 #define MIN(a, b) ((a)<(b)?(a):(b))
 #define MAX(a, b) ((a)>(b)?(a):(b))
 
@@ -881,455 +1031,6 @@ void mm_consolidate_timers(step_t *s, pipeline_t *p)
 
 }
 
-
-#if defined(__AMD_SPLIT_KERNELS__)
-
-void mm_trbuf_is_full(mm_trbuf_t* tr, step_t *s){
-    while (tr->acc_batch.total_n > s->batch_max_anchors) { // if the batch is full
-        tr->is_full = 1;
-        tr->is_pending = 1;
-		// move last read from acc_batch to pending batch (another memory poll)
-        chain_read_t *read_ptr_acc_batch = &tr->acc_batch.reads[tr->acc_batch.count - 1];
-        chain_read_t *read_ptr_pending_batch = &tr->pending_batch.reads[tr->pending_batch.count];
-		/* deep copy, with memory pool transaction*/
-        *read_ptr_pending_batch = *read_ptr_acc_batch;
-        if (s->p->opt->flag & MM_F_INDEPEND_SEG) {
-            read_ptr_pending_batch->qlens = (int *)kmalloc(tr->pending_batch.km, sizeof(int));
-            read_ptr_pending_batch->qseqs = (const char **)kmalloc(tr->pending_batch.km, sizeof(const char*));
-            read_ptr_pending_batch->qlens[0] = read_ptr_acc_batch->qlens[0];
-            read_ptr_pending_batch->qseqs[0] = read_ptr_acc_batch->qseqs[0];
-        } else {
-            read_ptr_pending_batch->qlens = (int *)kmalloc(tr->pending_batch.km, sizeof(int)*read_ptr_acc_batch->n_seg);
-            read_ptr_pending_batch->qseqs = (const char **)kmalloc(tr->pending_batch.km, sizeof(const char*)*read_ptr_acc_batch->n_seg);
-            memcpy(read_ptr_pending_batch->qlens,  read_ptr_acc_batch->qlens, sizeof(int)*read_ptr_acc_batch->n_seg);
-            memcpy(read_ptr_pending_batch->qseqs, read_ptr_acc_batch->qseqs, sizeof(const char*)*read_ptr_acc_batch->n_seg);
-        }
-        read_ptr_pending_batch->mini_pos = (uint64_t*)kmalloc(tr->pending_batch.km, read_ptr_acc_batch->n_mini_pos * sizeof(uint64_t));
-		read_ptr_pending_batch->a = (mm128_t*)kmalloc(tr->pending_batch.km, read_ptr_acc_batch->n * sizeof(mm128_t));
-        memcpy(read_ptr_pending_batch->mini_pos, read_ptr_acc_batch->mini_pos, read_ptr_acc_batch->n_mini_pos * sizeof(uint64_t));
-        memcpy(read_ptr_pending_batch->a, read_ptr_acc_batch->a, read_ptr_acc_batch->n * sizeof(mm128_t));
-        strcpy(read_ptr_pending_batch->seq.name, read_ptr_acc_batch->seq.name);
-        tr->pending_batch.count++;
-        tr->pending_batch.total_n += read_ptr_acc_batch->n;
-
-        // remove read from acc_batch
-        tr->acc_batch.count--;
-        tr->acc_batch.total_n -= read_ptr_acc_batch->n;
-        kfree(tr->acc_batch.km, read_ptr_acc_batch->mini_pos);
-        kfree(tr->acc_batch.km, read_ptr_acc_batch->a);
-        kfree(tr->acc_batch.km, read_ptr_acc_batch->qlens);
-        kfree(tr->acc_batch.km, read_ptr_acc_batch->qseqs);
-    }
-}
-
-//// new structure ////
-
-static void seed(step_t *s, mm_trbuf_t *tr, mm_tbuf_t *b, int tid, long i);
-static void chain(step_t *s, mm_trbuf_t *tr, mm_tbuf_t *b, int tid, long i);
-static void align(step_t *s, mm_trbuf_t *tr, mm_tbuf_t *b, int tid, long i);
-
-// TODO: work on processing all n before moving on instead of n_threads each time this is called
-// NOTE: seed, chain and align only use tr->acc_batch for now
-void seed_chain_align_tmp(void *data, long iteration, int num_threads, long n){
-	omp_set_num_threads(num_threads);
-	step_t *s = (step_t *)data;
-	#pragma omp parallel shared(s, iteration, num_threads, n) 
-	{
-		int tid = omp_get_thread_num();
-		long i = iteration * num_threads + tid; // note may exceed n reads
-		mm_tbuf_t *b = s->buf[tid];
-		mm_trbuf_t *tr = s->trbuf[tid];
-		long j;
-		#pragma omp for
-		for (j = 0; j < num_threads; ++j){
-			if(i < n)
-				seed(s, tr, b, j, i);
-		}
-		#pragma omp barrier
-		#pragma omp for 
-		for (j = 0; j < num_threads; ++j){
-			if(i < n)
-				chain(s, tr, b, j, i);
-		}
-		#pragma omp barrier
-		#pragma omp for 
-		for (j = 0; j < num_threads; ++j){
-			if(i < n)
-				align(s, tr, b, j, i);
-		}
-	}
-}
-
-static void seed(step_t *s, mm_trbuf_t *tr, mm_tbuf_t *b, int tid, long i){
-	int off = s->seg_off[i];
-	int j, pe_ori = s->p->opt->pe_ori;
-
-	assert(s->n_seg[i] <= MM_MAX_SEG);
-	if (mm_dbg_flag & MM_DBG_PRINT_QNAME) {
-		fprintf(stderr, "QR\t%s\t%d\t%d\n", s->seq[off].name, tid, s->seq[off].l_seq);
-		double t = realtime(); // TODO: this t doesn't do anything
-	}
-
-	int n_indep_reads = (s->p->opt->flag & MM_F_INDEPEND_SEG) ? s->n_seg[i] : 1;
-	void *km;
-	chain_read_t *read_ptr = tr->acc_batch.reads;
-	tr->acc_batch.count = n_indep_reads;
-	km = tr->acc_batch.km;
-
-	if (s->p->opt->flag & MM_F_INDEPEND_SEG) { // assign to different chain_read_t if segments are indepent
-		for (j = 0; j < s->n_seg[i]; ++j) {
-			read_ptr->qlens = (int *)kmalloc(km, sizeof(int));
-			read_ptr->qseqs = (const char **)kmalloc(km, sizeof(const char *));
-			if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori>>1&1)) || (j == 1 && (pe_ori&1))))
-				mm_revcomp_bseq(&s->seq[off + j]);
-			read_ptr->qlens[0] = s->seq[off + j].l_seq;
-			read_ptr->qseqs[0] = s->seq[off + j].seq;
-			read_ptr->n_seg = 1;
-
-			read_ptr->seq.i = i;
-			read_ptr->seq.seg_id = j;
-			strcpy(read_ptr->seq.name, s->seq[off + j].name);
-			read_ptr->seq.n_alt = s->p->mi->n_alt;
-			read_ptr->seq.is_alt = 0;
-
-			read_ptr++;
-		}
-
-	} else {
-		read_ptr->qlens = (int *)kmalloc(km, s->n_seg[i] * sizeof(int));
-		read_ptr->qseqs = (const char **)kmalloc(km, s->n_seg[i] * sizeof(const char *));
-		read_ptr->n_seg = s->n_seg[i];
-		for (j = 0; j < s->n_seg[i]; ++j) {
-			if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori>>1&1)) || (j == 1 && (pe_ori&1))))
-				mm_revcomp_bseq(&s->seq[off + j]);
-			read_ptr->qlens[j] = s->seq[off + j].l_seq;
-			read_ptr->qseqs[j] = s->seq[off + j].seq;
-		}
-
-		read_ptr->seq.i = i;
-		read_ptr->seq.seg_id = 0;
-		strcpy(read_ptr->seq.name, s->seq[off].name);
-		read_ptr->seq.n_alt = s->p->mi->n_alt;
-		read_ptr->seq.is_alt = 0;
-
-		read_ptr++;
-	}
-	
-
-	// Seed
-	for (j = 0; j < n_indep_reads; j++) {
-		read_ptr--;
-		mm_map_seed(s->p->mi, s->p->opt, read_ptr, b, km);
-		tr->acc_batch.total_n += read_ptr->n;
-		assert(read_ptr->n_mini_pos >= 0);
-	}
-
-	assert(tr->acc_batch.total_n <= s->batch_max_anchors);
-}
-
-
-static void chain(step_t *s, mm_trbuf_t *tr, mm_tbuf_t *b, int tid, long i){
-	int iread;
-	double t1 = realtime();		
-	// cpu kernel
-	for (iread=0; iread<tr->acc_batch.count; iread++) {
-		mm_map_chain(s->p->mi, s->p->opt, &tr->acc_batch.reads[iread], b, tr->acc_batch.km);
-	}
-	b->timers[MM_TIME_CHAIN] += realtime() - t1;
-}
-
-static void align(step_t *s, mm_trbuf_t *tr, mm_tbuf_t *b, int tid, long i){
-	mm_batch_trbuf_t *batch = &tr->acc_batch;
-	int j, iread, off, pe_ori = s->p->opt->pe_ori;
-	/* Copy rep_len & frag_gap to step_t */
-	for (iread = 0; iread < batch->count; iread++) {
-		i = batch->reads[iread].seq.i;
-		j = batch->reads[iread].seq.seg_id;
-		off = s->seg_off[i] + j;
-		for (int k = 0; k < batch->reads[iread].n_seg; k++) {
-			s->rep_len[off + k] = batch->reads[iread].rep_len;
-			s->frag_gap[off + k] = batch->reads[iread].frag_gap;
-		}
-	}
-	// Align
-	for (iread = 0; iread < batch->count; iread++) {
-		i = batch->reads[iread].seq.i;
-		off = s->seg_off[i];
-		j = batch->reads[iread].seq.seg_id;
-		mm_map_align(s->p->mi, s->p->opt, &batch->reads[iread], &s->reg[off + j], &s->n_reg[off + j], b, batch->km) ;
-		if (s->p->opt->flag & MM_F_INDEPEND_SEG) {
-			if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori >> 1 & 1)) ||
-										(j == 1 && (pe_ori & 1)))) {
-				int k, t;
-				mm_revcomp_bseq(&s->seq[off + j]);
-				for (k = 0; k < s->n_reg[off + j]; ++k) {
-					mm_reg1_t *r = &s->reg[off + j][k];
-					t = r->qs;
-					r->qs = batch->reads[iread].qlens[j] - r->qe;
-					r->qe = batch->reads[iread].qlens[j] - t;
-					r->rev = !r->rev;
-				}
-			}
-		} else {
-			for (j = 0; j < batch->reads[iread].n_seg;
-					++j) {  // flip the query strand and coordinate to the
-							// original read strand
-				if (s->n_seg[i] == 2 &&
-					((j == 0 && (pe_ori >> 1 & 1)) ||
-						(j == 1 && (pe_ori & 1)))) {
-					int k, t;
-					mm_revcomp_bseq(&s->seq[off + j]);
-					for (k = 0; k < s->n_reg[off + j]; ++k) {
-						mm_reg1_t *r = &s->reg[off + j][k];
-						t = r->qs;
-						r->qs = batch->reads[iread].qlens[j] - r->qe;
-						r->qe = batch->reads[iread].qlens[j] - t;
-						r->rev = !r->rev;
-					}
-				}
-			}
-		}
-		if (mm_dbg_flag & MM_DBG_PRINT_QNAME)
-			fprintf(stderr, "QT\t%s\t%d\t%.6f\n", s->seq[off].name, tid, realtime()); // TODO: realtime() - t to get accurate time
-	}
-	mm_trbuf_batch_reset(batch, s->batch_max_reads, s->p->opt);
-}
-
-///////////////////////
-	
-static void worker_for(void *_data, long i_in, int tid) // kt_for() callback
-{
-    step_t *s = (step_t *)_data;
-    long i = i_in;
-    int j, iread, off, pe_ori = s->p->opt->pe_ori;
-    double t = 0.0;
-	mm_tbuf_t *b = s->buf[tid];
-	mm_trbuf_t *tr = s->trbuf[tid];
-
-    // Check if this is a valid read
-	if (i != -1) {
-		off = s->seg_off[i];
-
-        assert(s->n_seg[i] <= MM_MAX_SEG);
-		if (mm_dbg_flag & MM_DBG_PRINT_QNAME) {
-			fprintf(stderr, "QR\t%s\t%d\t%d\n", s->seq[off].name, tid, s->seq[off].l_seq);
-			t = realtime();
-		}
-
-        int n_indep_reads = (s->p->opt->flag & MM_F_INDEPEND_SEG) ? s->n_seg[i] : 1;
-        void *km;
-        chain_read_t *read_ptr = 0;
-        if ( n_indep_reads + tr->acc_batch.count <= s->batch_max_reads){
-            read_ptr = tr->acc_batch.reads + tr->acc_batch.count;
-            tr->acc_batch.count += n_indep_reads;
-            km = tr->acc_batch.km;
-        } else {
-            read_ptr = tr->pending_batch.reads + tr->pending_batch.count;
-            tr->pending_batch.count += n_indep_reads;
-            tr->is_full = 1;
-            tr->is_pending = 1;
-            km = tr->pending_batch.km;
-        }
-
-        if (s->p->opt->flag & MM_F_INDEPEND_SEG) { // assign to different chain_read_t if segments are indepent
-            for (j = 0; j < s->n_seg[i]; ++j) {
-                read_ptr->qlens = (int *)kmalloc(km, sizeof(int));
-                read_ptr->qseqs = (const char **)kmalloc(km, sizeof(const char *));
-                if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori>>1&1)) || (j == 1 && (pe_ori&1))))
-					mm_revcomp_bseq(&s->seq[off + j]);
-                read_ptr->qlens[0] = s->seq[off + j].l_seq;
-                read_ptr->qseqs[0] = s->seq[off + j].seq;
-                read_ptr->n_seg = 1;
-
-                read_ptr->seq.i = i;
-                read_ptr->seq.seg_id = j;
-                strcpy(read_ptr->seq.name, s->seq[off + j].name);
-                read_ptr->seq.n_alt = s->p->mi->n_alt;
-                read_ptr->seq.is_alt = 0;
-
-                read_ptr++;
-            }
-
-        } else {
-            read_ptr->qlens = (int *)kmalloc(km, s->n_seg[i] * sizeof(int));
-			read_ptr->qseqs = (const char **)kmalloc(km, s->n_seg[i] * sizeof(const char *));
-            read_ptr->n_seg = s->n_seg[i];
-            for (j = 0; j < s->n_seg[i]; ++j) {
-				if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori>>1&1)) || (j == 1 && (pe_ori&1))))
-					mm_revcomp_bseq(&s->seq[off + j]);
-                read_ptr->qlens[j] = s->seq[off + j].l_seq;
-                read_ptr->qseqs[j] = s->seq[off + j].seq;
-            }
-
-            read_ptr->seq.i = i;
-            read_ptr->seq.seg_id = 0;
-            strcpy(read_ptr->seq.name, s->seq[off].name);
-            read_ptr->seq.n_alt = s->p->mi->n_alt;
-            read_ptr->seq.is_alt = 0;
-
-            read_ptr++;
-        }
-		
-
-		// Seed
-        for (j = 0; j < n_indep_reads; j++) {
-            read_ptr--;
-            mm_map_seed(s->p->mi, s->p->opt, read_ptr, b, km);
-            if 
-				(tr->is_pending) tr->pending_batch.total_n += read_ptr->n;
-			else
-                tr->acc_batch.total_n += read_ptr->n;
-            assert(read_ptr->n_mini_pos >= 0);
-        }
-
-
-		// move reads from acc_batch to pending_batch if neccessary
-        mm_trbuf_is_full(tr, s);
-    } else {
-		tr->is_full = 1; // set acc_batch to ready to launch if this is the last read
-	}
-
-    // Did we accumulate enough reads or get to the last batch of reads?
-    while (tr->is_full || (i_in == -1 && tr->has_launched)) {
-        // Chain
-		double t1 = realtime();
-        /* perform chaining on acc_batch and move to launched_batch. move current pending batch to acc_batch. Store results in pending batch. */
-		if (tr->is_full) {
-
-			if (s->p->opt->flag & MM_F_GPU_CHAIN){
-				// chaining on GPU
-				mm_batch_trbuf_t kernel_batch = tr->acc_batch;
-				chain_stream_gpu(s->p->mi, s->p->opt, &kernel_batch.reads, &kernel_batch.count, tid, tr->launched_batch.km);
-				// check if the returned batch exits, and/or is the launched_batch.
-				if (kernel_batch.reads) { // if chain_stream_gpu return non NULL reads
-					assert(tr->has_launched);
-					// FIXME: temporary solution for reads fail to fit in microbatch
-					// cpu kernel
-					for (kernel_batch.count; kernel_batch.count<tr->launched_batch.count; kernel_batch.count++) {
-						fprintf(stderr, "[WARNING] Run CPU kernel for read %d\n", kernel_batch.count);
-						mm_map_chain(s->p->mi, s->p->opt, &kernel_batch.reads[kernel_batch.count], b, tr->launched_batch.km);
-					}
-					assert(kernel_batch.count == tr->launched_batch.count);
-					kernel_batch = tr->launched_batch;
-					tr->launched_batch = tr->acc_batch;
-					tr->acc_batch = tr->pending_batch;
-					tr->pending_batch = kernel_batch;
-					tr->is_pending = 1;
-				} else {
-					assert(!tr->has_launched); // no launched batch
-					kernel_batch = tr->launched_batch;
-					tr->launched_batch = tr->acc_batch;
-					tr->acc_batch = tr->pending_batch;
-					tr->pending_batch = kernel_batch;
-					tr->is_pending = 0;
-				}
-				tr->is_full = 0;
-				tr->has_launched = 1;
-			} else {
-				// cpu kernel
-				for (iread=0; iread<tr->acc_batch.count; iread++) {
-						mm_map_chain(s->p->mi, s->p->opt, &tr->acc_batch.reads[iread], b, tr->acc_batch.km);
-				}
-				mm_batch_trbuf_t kernel_batch = tr->acc_batch;
-				tr->acc_batch = tr->pending_batch;
-				tr->pending_batch = kernel_batch;
-				tr->has_launched = 0;
-				tr->is_full = 0;
-				tr->is_pending = 1;
-				// end of cpu kernel
-			}
-
-		} else if (s->p->opt->flag & MM_F_GPU_CHAIN){ // clean up if all the pending kernels have been launched
-			assert(i_in == -1 && tr->has_launched);
-			mm_batch_trbuf_t kernel_batch;
-			finish_stream_gpu(s->p->mi, s->p->opt, &kernel_batch.reads, &kernel_batch.count, tid, tr->launched_batch.km);
-			// FIXME: temporary solution for reads fail to fit in microbatch
-			// cpu kernel
-			for (kernel_batch.count; kernel_batch.count<tr->launched_batch.count; kernel_batch.count++) {
-				fprintf(stderr, "[WARNING] Run CPU kernel for read %d\n", iread);
-				mm_map_chain(s->p->mi, s->p->opt, &kernel_batch.reads[kernel_batch.count], b, kernel_batch.km);
-			}
-			assert(kernel_batch.count == tr->launched_batch.count);
-			kernel_batch = tr->launched_batch;
-			tr->is_full = 0;
-			tr->is_pending = 1;
-			tr->has_launched = 0;
-			tr->launched_batch = tr->acc_batch;
-			tr->acc_batch = tr->pending_batch;
-			tr->pending_batch = kernel_batch;
-        }
-
-		// NOTE: Because it just submit the GPU task, this timer doesn't make sense for GPU
-		b->timers[MM_TIME_CHAIN] += realtime() - t1;
-
-        mm_batch_trbuf_t *batch = &tr->pending_batch;
-
-		if (tr->is_pending){
-
-		/* Copy rep_len & frag_gap to step_t */
-		for (iread = 0; iread < batch->count; iread++) {
-			i = batch->reads[iread].seq.i;
-			j = batch->reads[iread].seq.seg_id;
-			off = s->seg_off[i] + j;
-			for (int k = 0; k < batch->reads[iread].n_seg; k++) {
-				s->rep_len[off + k] = batch->reads[iread].rep_len;
-				s->frag_gap[off + k] = batch->reads[iread].frag_gap;
-			}
-		}
-		// Align
-		for (iread = 0; iread < batch->count; iread++) {
-			i = batch->reads[iread].seq.i;
-			off = s->seg_off[i];
-			j = batch->reads[iread].seq.seg_id;
-			mm_map_align(s->p->mi, s->p->opt, &batch->reads[iread], &s->reg[off + j], &s->n_reg[off + j], b, batch->km) ;
-			if (s->p->opt->flag & MM_F_INDEPEND_SEG) {
-				if (s->n_seg[i] == 2 && ((j == 0 && (pe_ori >> 1 & 1)) ||
-											(j == 1 && (pe_ori & 1)))) {
-					int k, t;
-					mm_revcomp_bseq(&s->seq[off + j]);
-					for (k = 0; k < s->n_reg[off + j]; ++k) {
-						mm_reg1_t *r = &s->reg[off + j][k];
-						t = r->qs;
-                        r->qs = batch->reads[iread].qlens[j] - r->qe;
-                        r->qe = batch->reads[iread].qlens[j] - t;
-                        r->rev = !r->rev;
-					}
-				}
-			} else {
-                for (j = 0; j < batch->reads[iread].n_seg;
-                     ++j) {  // flip the query strand and coordinate to the
-                             // original read strand
-                    if (s->n_seg[i] == 2 &&
-						((j == 0 && (pe_ori >> 1 & 1)) ||
-							(j == 1 && (pe_ori & 1)))) {
-						int k, t;
-						mm_revcomp_bseq(&s->seq[off + j]);
-						for (k = 0; k < s->n_reg[off + j]; ++k) {
-							mm_reg1_t *r = &s->reg[off + j][k];
-							t = r->qs;
-                            r->qs = batch->reads[iread].qlens[j] - r->qe;
-                            r->qe = batch->reads[iread].qlens[j] - t;
-                            r->rev = !r->rev;
-						}
-					}
-                }
-            }
-			if (mm_dbg_flag & MM_DBG_PRINT_QNAME)
-				fprintf(stderr, "QT\t%s\t%d\t%.6f\n", s->seq[off].name, tid, realtime() - t);
-        }
-
-        // reset pending batch
-        mm_trbuf_batch_reset(batch, s->batch_max_reads, s->p->opt);
-        tr->pending_batch = *batch;
-        tr->is_pending = 0;
-        tr->pending_batch.batchid = tr->acc_batch.batchid + 1;
-
-        }  // if tr->is_pending;
-    }
-}
-#endif
-
-#ifndef __AMD_SPLIT_KERNELS__
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
 {
     step_t *s = (step_t*)_data;
@@ -1459,13 +1160,6 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			s->p = p;
 			for (i = 0; i < s->n_seq; ++i)
 				s->seq[i].rid = p->n_processed++;
-			s->buf = (mm_tbuf_t**)calloc(p->n_threads, sizeof(mm_tbuf_t*));
-			for (i = 0; i < p->n_threads; ++i)
-				s->buf[i] = mm_tbuf_init();
-#if defined(__AMD_SPLIT_KERNELS__)
-			s->trbuf = (mm_trbuf_t**)calloc(p->n_threads, sizeof(mm_trbuf_t*));
-#endif
-
 			s->n_reg = (int*)calloc(5 * s->n_seq, sizeof(int));
 			s->seg_off = s->n_reg + s->n_seq; // seg_off, n_seg, rep_len and frag_gap are allocated together with n_reg
 			s->n_seg = s->seg_off + s->n_seq;
@@ -1481,8 +1175,8 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			return s;
 		} else free(s);
     } else if (step == 1) { // step 1: map
+		step_t *s = (step_t *)in;
 #if defined(__AMD_SPLIT_KERNELS__)
-        step_t *s = (step_t *)in;
         if (p->opt->flag & MM_F_GPU_CHAIN) {
             s->batch_max_anchors = p->opt->gpu_chain_max_anchors;
 			// fprintf(stderr, "s->batch_max_anchors = %lu, p->opt->gpu_chain_max_anchors = %lu\n", s->batch_max_anchors, p->opt->gpu_chain_max_anchors);
@@ -1492,24 +1186,41 @@ static void *worker_pipeline(void *shared, int step, void *in)
             s->batch_max_anchors = SIZE_MAX;
             s->batch_max_reads = N_ACCUM;
         }
-        for (i = 0; i < p->n_threads; ++i)
-            s->trbuf[i] = mm_trbuf_init(s->batch_max_reads, p->opt);
+		// init memory needed
+		// compute approximate num batches to use
+		s->num_batches_reserved = ceil(s->n_frag / s->batch_max_reads) + EXTRA_BATCHES; // allocate additional in case anchors exceed per batch
+		s->batches = (mm_batch_buf_t *)calloc(s->num_batches_reserved, sizeof(mm_batch_buf_t));
+		for(i = 0; i < s->num_batches_reserved; ++i){
+			mm_batch_init(&s->batches[i], s->batch_max_reads);
+		}
+		s->buf = mm_tbuf_init();
+
+		if (p->n_parts > 0) merge_hits(s);
+		else seed_chain_align(p->n_threads, in, s->n_frag);
+#else
+		s->buf = (mm_tbuf_t**)calloc(p->n_threads, sizeof(mm_tbuf_t*));
+		for (i = 0; i < p->n_threads; ++i)
+			s->buf[i] = mm_tbuf_init();
+		if (p->n_parts > 0) merge_hits(s);
+		else kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
 #endif
-		if (p->n_parts > 0) merge_hits((step_t*)in);
-		//else kt_for(p->n_threads, worker_for, in, ((step_t*)in)->n_frag);
-		else kt_for(p->n_threads, seed_chain_align_tmp, in, ((step_t*)in)->n_frag);
 		return in;
     } else if (step == 2) { // step 2: output
 		void *km = 0;
 		step_t *s = (step_t*)in;
 		const mm_idx_t *mi = p->mi;
+		
+#if defined(__AMD_SPLIT_KERNELS__)
+		mm_tbuf_destroy(s->buf);
+		for(i = 0; i < s->num_batches_reserved; ++i){
+			mm_batch_destroy(&s->batches[i]);
+		}
+		free(s->batches);
+#else
 		// consolidate timers from threads
 		mm_consolidate_timers (s, p);
 		for (i = 0; i < p->n_threads; ++i) mm_tbuf_destroy(s->buf[i]);
 		free(s->buf);
-#if defined(__AMD_SPLIT_KERNELS__)
-		for (i = 0; i < p->n_threads; ++i) mm_trbuf_destroy(s->trbuf[i]);
-		free(s->trbuf);
 #endif
 
 		if ((p->opt->flag & MM_F_OUT_CS) && !(mm_dbg_flag & MM_DBG_NO_KALLOC)) km = km_init();
