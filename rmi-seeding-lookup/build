@@ -15,7 +15,7 @@ then
     cd ../..
 fi
 echo "Libwb library build done"
-# module load hip
-export PATH=/opt/rocm-5.7.1/hip/bin/:$PATH
-hipcc -ggdb $1 -L$PWD/libwb/build/ -o $2 -I $PWD/libwb/ -std=c++11 -lwb
+
+export PATH=/opt/cuda/bin:$PATH
+nvcc -G -g -lineinfo $1 -L$PWD/libwb/build/ -o $2 -I $PWD/libwb/ -std=c++11 -lwb
 echo "Successfully built $2"

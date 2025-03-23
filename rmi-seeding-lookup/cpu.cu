@@ -1,12 +1,12 @@
 #include <fstream>
 #include <wb.h>
-#include <hip/hip_runtime.h>
+#include <cuda_runtime.h>
 
 #define wbCheck(stmt)                                                     \
   do {                                                                    \
-    hipError_t err = stmt;                                               \
-    if (err != hipSuccess) {                                             \
-      wbLog(ERROR, "HIP error: ", hipGetErrorString(err));              \
+    cudaError_t err = stmt;                                               \
+    if (err != cudaSuccess) {                                             \
+      wbLog(ERROR, "CUDA error: ", cudaGetErrorString(err));              \
       wbLog(ERROR, "Failed to run stmt ", #stmt);                         \
       return -1;                                                          \
     }                                                                     \
@@ -42,7 +42,7 @@ uint64_t* values_enc;
 uint64_t* values_enc_bin;
 
 bool loadRMI() {
-  string filename = "./MT-human.fa_map-ont_minimizers_key_value_sorted_keys.rmi_PARAMETERS";
+  std::string filename = "./MT-human.fa_map-ont_minimizers_key_value_sorted_keys.rmi_PARAMETERS";
   std::ifstream infile(filename, std::ios::in | std::ios::binary);
   if (!infile.good()) {
     printf("%s file not found\n", filename.c_str());
@@ -54,7 +54,7 @@ bool loadRMI() {
   infile.read((char *) &L1_SIZE, sizeof(int64_t));
   
   printf("L0_PARAMETER0 = %E, L0_PARAMETER1 = %E, L1_SIZE = %ld\n", 
-            L0_PARAMETER0, L0_PARAMETER1, L1_SIZE);
+         L0_PARAMETER0, L0_PARAMETER1, L1_SIZE);
   
   L1_PARAMETERS = (double*) malloc(L1_SIZE * 3 * sizeof(double));
   if (L1_PARAMETERS == NULL) {
@@ -73,7 +73,7 @@ bool loadRMI() {
 }
 
 bool loadSortedArray() {
-  string filename = "./MT-human.fa_map-ont_minimizers_key_value_sorted_keys.uint64";
+  std::string filename = "./MT-human.fa_map-ont_minimizers_key_value_sorted_keys.uint64";
   std::ifstream infile(filename, std::ios::in | std::ios::binary);
   if (!infile.good()) {
     printf("%s file not found\n", filename.c_str());
@@ -83,7 +83,7 @@ bool loadSortedArray() {
   infile.read((char *) &n, sizeof(uint64_t));
   fprintf(stderr, "n = %ld\n", n);
 
-  sorted_array =(uint64_t*) malloc(n * sizeof(uint64_t));
+  sorted_array = (uint64_t*) malloc(n * sizeof(uint64_t));
   
   infile.read((char*)sorted_array, n * sizeof(uint64_t));
 
@@ -98,14 +98,14 @@ bool loadSortedArray() {
 
 void loadBin(){
   std::ifstream f_size("./MT-human.fa_map-ont_minimizers_key_value_sorted_size");
-	f_size >> keys_size;
-	f_size >> p_size;
+  f_size >> keys_size;
+  f_size >> p_size;
 
   values_enc = (uint64_t*) malloc(keys_size * sizeof(uint64_t));
   p = (uint64_t*) malloc(p_size * sizeof(uint64_t));
 
-  string f1_name = "./MT-human.fa_map-ont_minimizers_key_value_sorted_pos_bin";
-  string f2_name = "./MT-human.fa_map-ont_minimizers_key_value_sorted_val_bin";
+  std::string f1_name = "./MT-human.fa_map-ont_minimizers_key_value_sorted_pos_bin";
+  std::string f2_name = "./MT-human.fa_map-ont_minimizers_key_value_sorted_val_bin";
   std::ifstream instream_f1(f1_name, std::ifstream::binary);
   std::ifstream instream_f2(f2_name, std::ifstream::binary);
   instream_f1.seekg(0);
@@ -114,7 +114,7 @@ void loadBin(){
 
   instream_f2.seekg(0);
   instream_f2.read((char*) &p[0], p_size*sizeof(uint64_t));
-  instream_f2.close();	
+  instream_f2.close();  
 }
 
 void loadMinimizer(uint64_t* minimizer, int array_size) {
@@ -191,7 +191,7 @@ void rmiLookup(uint64_t *minimizers, int64_t *pos_array, int len, int i) {
   if (bm.m == 1) {
     pos = bm.first;
     if(sorted_array[pos] != bm.key)
-  	  pos = -1;
+      pos = -1;
     pos_array[i] = pos;
   }
 }
@@ -239,30 +239,30 @@ int main(int argc, char *argv[]) {
 
   wbLog(TRACE, "The input size is ", inputLength);
 
+  // Pre-run several times to warm up caches and for any JIT optimizations
   mmIdxGet(hostMinimizer, hostOutputLisaPos, hostOutputNumHits, inputLength);
   mmIdxGet(hostMinimizer, hostOutputLisaPos, hostOutputNumHits, inputLength);
   mmIdxGet(hostMinimizer, hostOutputLisaPos, hostOutputNumHits, inputLength);
   mmIdxGet(hostMinimizer, hostOutputLisaPos, hostOutputNumHits, inputLength);
   mmIdxGet(hostMinimizer, hostOutputLisaPos, hostOutputNumHits, inputLength);
 
-  
-  hipEvent_t start, stop;
-  hipEventCreate(&start);
-  hipEventCreate(&stop);
-  hipEventRecord(start, 0);
+  cudaEvent_t start, stop;
+  wbCheck(cudaEventCreate(&start));
+  wbCheck(cudaEventCreate(&stop));
+  wbCheck(cudaEventRecord(start, 0));
   
   int cycles = 100;
   for (int i = 0; i < cycles; i++) {
     mmIdxGet(hostMinimizer, hostOutputLisaPos, hostOutputNumHits, inputLength);
   }
-  hipEventRecord(stop, 0);
-  hipEventSynchronize(stop);
+  wbCheck(cudaEventRecord(stop, 0));
+  wbCheck(cudaEventSynchronize(stop));
   float milliseconds = 0;
-  hipEventElapsedTime(&milliseconds, start, stop);
+  wbCheck(cudaEventElapsedTime(&milliseconds, start, stop));
   std::cout << "Average elapsed time: " << milliseconds / cycles << " ms" << std::endl;
 
-  hipEventDestroy(start);
-  hipEventDestroy(stop);
+  wbCheck(cudaEventDestroy(start));
+  wbCheck(cudaEventDestroy(stop));
 
   bool isResultCorrect = true;
   for (int i = 0; i < inputLength; i++) {
