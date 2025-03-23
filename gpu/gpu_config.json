@@ -5,8 +5,8 @@
     "//min_n": "queries with less anchors will be handled on cpu",
     "long_seg_buffer_size": 100000000,
     "//long_seg_buffer_size": "maximum number of anchors to fit in the aggregated long segment buffer. ",
-    "max_total_n": 500000000, 
-    "max_read": 500000,
+    "max_total_n": 500, 
+    "max_read": 500,
      "//max_total_n, max_read": "maximum number of anchors / reads to fit in one micro batch. Make sure this fits in the device memory.",
     "range_kernel": {
         "blockdim": 512,

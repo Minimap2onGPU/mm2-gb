@@ -1,0 +1,41 @@
+cmake_minimum_required(VERSION 2.8 FATAL_ERROR)
+
+set(CMAKE_BUILD_TYPE Release)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_COLOR_MAKEFILE ON)
+set(VERBOSE_BUILD ON)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+set(CMAKE_MACOSX_RPATH TRUE)
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
+
+project(wb)
+
+set(current_dir "${CMAKE_CURRENT_SOURCE_DIR}")
+
+
+include(${current_dir}/sources.cmake)
+include(CheckCXXCompilerFlag)
+
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+CHECK_CXX_COMPILER_FLAG("-std=c++11" COMPILER_SUPPORTS_CXX11)
+if(COMPILER_SUPPORTS_CXX11)
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+else()
+  message(STATUS "The compiler ${CMAKE_CXX_COMPILER} has no C++11 support. Please use a different C++ compiler.")
+endif()
+
+message(STATUS "CMAKE_CXX_FLAGS : ${CMAKE_CXX_FLAGS}")
+set(WBLIB_STATIC ${WBLIB})
+set(WBLIB_SHARED lib${WBLIB})
+
+add_library(${WBLIB_STATIC} STATIC ${LIBWB_SOURCE_FILES} )
+add_library(${WBLIB_SHARED} SHARED ${LIBWB_SOURCE_FILES} )
+set_property(TARGET ${WBLIB_STATIC} PROPERTY CXX_STANDARD 11)
+set_property(TARGET ${WBLIB_SHARED} PROPERTY CXX_STANDARD 11)
+if (UNIX)
+  set_target_properties(${WBLIB_SHARED} PROPERTIES OUTPUT_NAME ${WBLIB_STATIC})
+endif (UNIX)
+set_property(TARGET ${WBLIB} PROPERTY CXX_STANDARD 11)

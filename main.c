@@ -7,6 +7,7 @@
 #include "mmpriv.h"
 #include "ketopt.h"
 
+
 #if defined(__AMD_SPLIT_KERNELS__)
 
 #include "plutils.h"
@@ -26,6 +27,16 @@ void liftrlimit()
 }
 #else
 void liftrlimit() {}
+#endif
+
+#ifdef LISA_HASH
+#include "lisa_hash.h"
+#ifdef __cplusplus
+	#include <string>
+#endif
+extern void create_lisa_hash(char *inputFile, char* rmi_prefix);
+extern void delete_lisa_hash();
+// lisa_hash *lh;
 #endif
 
 static ko_longopt_t long_options[] = {
@@ -142,9 +153,11 @@ int main(int argc, char *argv[])
 	liftrlimit();
 	mm_realtime0 = realtime();
 	mm_set_opt(0, &ipt, &opt);
+	char *preset_arg;
 
 	while ((c = ketopt(&o, argc, argv, 1, opt_str, long_options)) >= 0) { // test command line options and apply option -x/preset first
 		if (c == 'x') {
+			preset_arg = o.arg;	
 			if (mm_set_opt(o.arg, &ipt, &opt) < 0) {
 				fprintf(stderr, "[ERROR] unknown preset '%s'\n", o.arg);
 				return 1;
@@ -389,6 +402,11 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "[ERROR] incorrect input: in the sr mode, please specify no more than two query files.\n");
 		return 1;
 	}
+	// char result
+	// preset_arg = argv[o.ind];
+	//  + "_" + preset_arg + "_minimizers_key_value_sorted";
+	// strcat()
+
 	idx_rdr = mm_idx_reader_open(argv[o.ind], &ipt, fnw);
 	if (idx_rdr == 0) {
 		fprintf(stderr, "[ERROR] failed to open file '%s': %s\n", argv[o.ind], strerror(errno));
@@ -431,12 +449,15 @@ int main(int argc, char *argv[])
 					__func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0), mi->n_seq);
 		if (argc != o.ind + 1) mm_mapopt_update(&opt, mi);
 		if (mm_verbose >= 3) mm_idx_stat(mi);
+#ifdef LISA_INDEX
+		mm_idx_dump_hash(preset_arg.c_str(), mi); 
+#endif			
 		if (junc_bed) mm_idx_bed_read(mi, junc_bed, 1);
 		if (alt_list) mm_idx_alt_read(mi, alt_list);
 		if (argc - (o.ind + 1) == 0) {
 			mm_idx_destroy(mi);
 			continue; // no query files
-		}
+		}		
 #if defined(__AMD_SPLIT_KERNELS__)
         // initialize gpu
         if (opt.flag & MM_F_GPU_CHAIN) {
@@ -448,6 +469,17 @@ int main(int argc, char *argv[])
         }
 #endif  // (__AMD_SPLIT_KERNELS__)
 		ret = 0;
+#ifdef LISA_HASH
+	fprintf(stderr, "Using LISA_HASH..\n");
+	mm_idx_destroy_mm_hash(mi);
+	char* prefix = "";
+	create_lisa_hash("test/MT-human.fa_map-ont_minimizers_key_value_sorted", prefix);
+	// lh = new lisa_hash(preset_arg, prefix);
+	fprintf(stderr, "Loading done.\n");
+//	total_time =  __rdtsc();
+//	fprintf(stderr, "\nIndexing Real time: %.3f sec;\n", realtime() - mapping_time);
+#endif
+	mm_realtime0 = realtime();
 		if (!(opt.flag & MM_F_FRAG_MODE)) {
 			for (i = o.ind + 1; i < argc; ++i) {
 				ret = mm_map_file(mi, argv[i], &opt, n_threads);
@@ -456,7 +488,12 @@ int main(int argc, char *argv[])
 		} else {
 			ret = mm_map_file_frag(mi, argc - (o.ind + 1), (const char**)&argv[o.ind + 1], &opt, n_threads);
 		}
+		// mm_idx_destroy(mi);
+#ifdef LISA_HASH
+		mm_idx_destroy_seq(mi);
+#else
 		mm_idx_destroy(mi);
+#endif		
 		if (ret < 0) {
 			fprintf(stderr, "ERROR: failed to map the query file\n");
 			exit(EXIT_FAILURE);
@@ -497,5 +534,9 @@ int main(int argc, char *argv[])
         // // fprintf(stderr, "Avg (seed + chain + align) per thread = %.3f secs\n", (mm_time_seed_sum + mm_time_chain_sum + mm_time_align_sum)/(double)n_threads);
 		// fprintf(stderr, "Total (seed + chain + align) for %d thread(s) = %.3f secs\n", n_threads, (mm_time_seed_sum + mm_time_chain_sum + mm_time_align_sum));
 	}
+	#ifdef LISA_HASH
+		delete_lisa_hash();
+		// delete lh;
+	#endif
 	return 0;
 }
