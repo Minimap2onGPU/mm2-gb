@@ -15,7 +15,7 @@ struct mm_tbuf_s {
 	int rep_len, frag_gap; // updated per read. 
 	double timers[MM_N_THR_TIMERS];
 }; // per thread
-
+#define __AMD_SPLIT_KERNELS__ 1
 #if defined(__AMD_SPLIT_KERNELS__)
 
 #include "plutils.h"
@@ -761,7 +761,7 @@ typedef struct {
 	mm_tbuf_t *buf;
 	int batch_max_reads;
 	int num_batches_reserved; // number of batches allocated
-	int batches_index;
+	volatile int batches_index;
     int gpu_min_n;
 	mm_batch_buf_t *batches;
 	size_t batch_max_anchors;
@@ -775,10 +775,8 @@ typedef struct {
 
 /**
  * EFFECT: Move extra reads from <batch> to <next_batch> if exceed max_anchors
- * RETURNS: true if batch is full
  */
-bool mm_is_batch_full(mm_batch_buf_t* batch, mm_batch_buf_t* next_batch, step_t *s){
-	bool is_full = false;
+void mm_batch_anchors_full(mm_batch_buf_t* batch, mm_batch_buf_t* next_batch, step_t *s){
 	while (batch->total_n > s->batch_max_anchors) { // if the batch is full
 		// move last read from acc_batch to pending batch (another memory poll)
         chain_read_t *read_ptr_curr_batch = &batch->reads[batch->count - 1];
@@ -811,14 +809,16 @@ bool mm_is_batch_full(mm_batch_buf_t* batch, mm_batch_buf_t* next_batch, step_t 
         kfree(batch->km, read_ptr_curr_batch->a);
         kfree(batch->km, read_ptr_curr_batch->qlens);
         kfree(batch->km, read_ptr_curr_batch->qseqs);
-		is_full = true;
     }
-	return is_full;
 }
 
-static void seed(step_t *s, mm_batch_buf_t* batches, mm_tbuf_t *b, long i, int* batch_num);
+static void seed(step_t *s, mm_batch_buf_t* batches, mm_tbuf_t *b, long i, int n_indep_reads);
 static void chain(step_t *s, mm_batch_buf_t *batch, mm_tbuf_t *b);
 static void align(step_t *s, mm_batch_buf_t *batch, mm_tbuf_t *b);
+
+#if (defined(WIN32) || defined(_WIN32)) && defined(_MSC_VER)
+#define __sync_fetch_and_add(ptr, addend)     _InterlockedExchangeAdd((void*)ptr, addend)
+#endif
 
 /**
  * EFFECT: seed <n> reads before chaining and aligning batches generated
@@ -828,12 +828,34 @@ void seed_chain_align(int num_threads, void *data, long n){
 	step_t *s = (step_t *)data;
 	long i;
 	s->batches_index = 0;
-	int j;
+	int j, n_indep_reads;
 	mm_tbuf_t *b = s->buf;
-	mm_batch_buf_t *batches = s->batches;
-	#pragma omp parallel for // TODO: parallelize batching this (km shared, cannot simply multithread)
+	mm_batch_buf_t *batches = s->batches; // ready batches that have been init
+
+	// used by threads to index into its own batch
+	mm_batch_buf_t **tBatches = calloc(num_threads, sizeof(mm_batch_buf_t *));
+	for(j = 0; j < num_threads; ++j)
+		tBatches[j] = &batches[__sync_fetch_and_add(&s->batches_index, 1)];
+
+	mm_batch_buf_t *tBatch;
+	#pragma omp parallel for
 	for (i = 0; i < n; ++i){
-		seed(s, batches, b, i, &s->batches_index);
+		int tid = omp_get_thread_num();
+		tBatch = tBatches[tid];
+		// check if this batch has space to store these reads
+		n_indep_reads = (s->p->opt->flag & MM_F_INDEPEND_SEG) ? s->n_seg[i] : 1;
+		if (tBatch->count  + n_indep_reads > s->batch_max_reads){
+			tBatches[tid] = &batches[__sync_fetch_and_add(&s->batches_index, 1)]; // move to the next batch in buffer if no space
+			tBatch = tBatches[tid];
+		}
+		seed(s, tBatch, b, i, n_indep_reads);
+
+		// check if anchors exceed
+		if (tBatch->total_n > s->batch_max_anchors) {
+			mm_batch_buf_t *nextTBatch = &batches[__sync_fetch_and_add(&s->batches_index, 1)];
+			mm_batch_anchors_full(tBatch, nextTBatch, s);
+			tBatches[tid] = nextTBatch;
+		}
 	}
 	// NOTE: since batches store independent blocks of memory for reads, thread can operate on any 2 distinct batches tgt
 	#pragma omp parallel for
@@ -846,18 +868,11 @@ void seed_chain_align(int num_threads, void *data, long n){
 	}
 }
 
-static void seed(step_t *s, mm_batch_buf_t* batches, mm_tbuf_t *b, long i, int* batch_num){
+static void seed(step_t *s, mm_batch_buf_t* batch, mm_tbuf_t *b, long i, int n_indep_reads){
 	int off = s->seg_off[i];
 	int j, pe_ori = s->p->opt->pe_ori;
 
 	assert(s->n_seg[i] <= MM_MAX_SEG);
-
-	int n_indep_reads = (s->p->opt->flag & MM_F_INDEPEND_SEG) ? s->n_seg[i] : 1;
-	mm_batch_buf_t *batch = &batches[*batch_num];
-	if (n_indep_reads + batch->count > s->batch_max_reads){
-		(*batch_num)++;
-		batch = &batches[*batch_num]; // move to the next batch in buffer
-	}
 	chain_read_t *read_ptr = batch->reads + batch->count;
 	batch->count += n_indep_reads;
 	void *km = batch->km;
@@ -909,10 +924,6 @@ static void seed(step_t *s, mm_batch_buf_t* batches, mm_tbuf_t *b, long i, int* 
 		batch->total_n += read_ptr->n;
 		assert(read_ptr->n_mini_pos >= 0);
 	}
-
-	// check if full
-	bool is_full = mm_is_batch_full(batch, &batches[(*batch_num) + 1], s);
-	if(is_full) *batch_num++; // move to next batch
 }
 
 static void chain(step_t *s, mm_batch_buf_t *batch, mm_tbuf_t *b){
