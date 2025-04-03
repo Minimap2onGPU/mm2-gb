@@ -820,6 +820,12 @@ static void align(step_t *s, mm_batch_buf_t *batch, mm_tbuf_t *b);
 #define __sync_fetch_and_add(ptr, addend)     _InterlockedExchangeAdd((void*)ptr, addend)
 #endif
 
+mm_batch_buf_t* get_init_next_batch(step_t *s) {
+	mm_batch_buf_t* res = &s->batches[__sync_fetch_and_add(&s->batches_index, 1)];
+	mm_batch_init(res, s->batch_max_reads);
+	return res;
+}
+
 /**
  * EFFECT: seed <n> reads before chaining and aligning batches generated
  */
@@ -827,15 +833,17 @@ void seed_chain_align(int num_threads, void *data, long n){
 	omp_set_num_threads(num_threads);
 	step_t *s = (step_t *)data;
 	long i;
-	s->batches_index = 0;
 	int j, n_indep_reads;
 	mm_tbuf_t *b = s->buf;
 	mm_batch_buf_t *batches = s->batches; // ready batches that have been init
 
-	// used by threads to index into its own batch
+	// init <num_batches> first for each thread
 	mm_batch_buf_t **tBatches = calloc(num_threads, sizeof(mm_batch_buf_t *));
-	for(j = 0; j < num_threads; ++j)
-		tBatches[j] = &batches[__sync_fetch_and_add(&s->batches_index, 1)];
+	for(j = 0; j < num_threads; ++j){
+		tBatches[j] = &batches[j];
+		mm_batch_init(tBatches[j], s->batch_max_reads);
+	}
+	s->batches_index = num_threads;
 
 	mm_batch_buf_t *tBatch;
 	#pragma omp parallel for
@@ -844,15 +852,15 @@ void seed_chain_align(int num_threads, void *data, long n){
 		tBatch = tBatches[tid];
 		// check if this batch has space to store these reads
 		n_indep_reads = (s->p->opt->flag & MM_F_INDEPEND_SEG) ? s->n_seg[i] : 1;
-		if (tBatch->count  + n_indep_reads > s->batch_max_reads){
-			tBatches[tid] = &batches[__sync_fetch_and_add(&s->batches_index, 1)]; // move to the next batch in buffer if no space
+		if (tBatch->count + n_indep_reads > s->batch_max_reads){
+			tBatches[tid] = get_init_next_batch(s); // move to the next batch in buffer if no space
 			tBatch = tBatches[tid];
 		}
 		seed(s, tBatch, b, i, n_indep_reads);
 
 		// check if anchors exceed
 		if (tBatch->total_n > s->batch_max_anchors) {
-			mm_batch_buf_t *nextTBatch = &batches[__sync_fetch_and_add(&s->batches_index, 1)];
+			mm_batch_buf_t *nextTBatch = get_init_next_batch(s);
 			mm_batch_anchors_full(tBatch, nextTBatch, s);
 			tBatches[tid] = nextTBatch;
 		}
@@ -1200,12 +1208,9 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		// init memory needed
 		// compute approximate num batches to use
 		s->num_batches_reserved = ceil(s->n_frag / s->batch_max_reads) + EXTRA_BATCHES; // allocate additional in case anchors exceed per batch
-		s->batches = (mm_batch_buf_t *)calloc(s->num_batches_reserved, sizeof(mm_batch_buf_t));
-		for(i = 0; i < s->num_batches_reserved; ++i){
-			mm_batch_init(&s->batches[i], s->batch_max_reads);
-		}
+		s->batches = (mm_batch_buf_t *)calloc(s->num_batches_reserved, sizeof(mm_batch_buf_t)); // note: batches themselves aren't init yet
+		s->batches_index = 0;
 		s->buf = mm_tbuf_init();
-
 		if (p->n_parts > 0) merge_hits(s);
 		else seed_chain_align(p->n_threads, in, s->n_frag);
 #else
@@ -1223,7 +1228,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		
 #if defined(__AMD_SPLIT_KERNELS__)
 		mm_tbuf_destroy(s->buf);
-		for(i = 0; i < s->num_batches_reserved; ++i){
+		for(i = 0; i < s->batches_index; ++i){
 			mm_batch_destroy(&s->batches[i]);
 		}
 		free(s->batches);
