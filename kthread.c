@@ -58,17 +58,9 @@ static void *ktf_worker(void *data)
 	pthread_exit(0);
 }
 
-// process n_threads worth of work from n each time before moving on
-inline void kt_for_tmp(int n_threads, void (*func)(void*,long,int, long), void *data, long n)
+void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n)
 {
-	long num_loops = ceil(n / 1);
-	for (long i = 0; i < num_loops; ++i) {
-		func(data, i, 1, n);
-	}
-	int tmp;
-}
-
-inline void kt_for_old(int n_threads, void (*func)(void*,long,int), void *data, long n){
+	double start = realtime();
 	if (n_threads > 1) {
 		int i;
 		kt_for_t t;
@@ -90,16 +82,8 @@ inline void kt_for_old(int n_threads, void (*func)(void*,long,int), void *data, 
 #endif
 
 	}
-}
-
-void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n)
-{
-	// double start = realtime();
-	//kt_for_old(n_threads, func, data, n);
-	// double end = realtime();
-	// printf("Time taken: %.6f seconds\n", end - start);
-	
-	return kt_for_tmp(n_threads, func, data, n);
+	double end = realtime();
+	printf("Time taken: %.6f seconds\n", end - start);
 }
 
 /*****************
