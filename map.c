@@ -846,6 +846,7 @@ void seed_chain_align(int num_threads, void *data, long n){
 	s->batches_index = num_threads;
 
 	mm_batch_buf_t *tBatch;
+	double start = realtime();
 	#pragma omp parallel for
 	for (i = 0; i < n; ++i){
 		int tid = omp_get_thread_num();
@@ -865,15 +866,21 @@ void seed_chain_align(int num_threads, void *data, long n){
 			tBatches[tid] = nextTBatch;
 		}
 	}
+	double seedEnd = realtime();
+	printf("Time for seeding: %.6f\n", seedEnd - start);
 	// NOTE: since batches store independent blocks of memory for reads, thread can operate on any 2 distinct batches tgt
 	#pragma omp parallel for
 	for(j = 0; j <= s->batches_index; ++j){
 		chain(s, &batches[j], b);
 	}
+	double chainEnd = realtime();
+	printf("Time for chaining: %.6f\n", chainEnd - seedEnd);
 	#pragma omp parallel for
 	for(j = 0; j <= s->batches_index; ++j){
 		align(s, &batches[j], b);
 	}
+	printf("Time for aligning: %.6f\n", realtime() - chainEnd);
+	printf("Time for everything: %.6f\n", realtime() - start);
 }
 
 static void seed(step_t *s, mm_batch_buf_t* batch, mm_tbuf_t *b, long i, int n_indep_reads){
