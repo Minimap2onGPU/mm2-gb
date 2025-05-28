@@ -1,0 +1,21 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+if [ "$#" -ne  2 ]; then 
+    echo "Usage: ./build {filename.cu} {program_name}"
+    exit 1
+fi
+if [ ! -d "libwb/build" ] 
+then
+    cd libwb/
+    mkdir build
+    cd build/
+    cmake ..
+    make -j4
+    cd ../..
+fi
+echo "Libwb library build done"
+# module load hip
+export PATH=/opt/rocm-5.7.1/hip/bin/:$PATH
+hipcc -ggdb $1 -L$PWD/libwb/build/ -o $2 -I $PWD/libwb/ -std=c++11 -lwb
+echo "Successfully built $2"
