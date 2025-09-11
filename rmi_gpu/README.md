@@ -164,10 +164,14 @@ To test the project, run the following command:
 The test will compare the output of the implementation with the output of the mm2-fast.
 The terminal will show the following message if the test is successful:
 ```
-L0_PARAMETER0 = 1.537038E-320, L0_PARAMETER1 = 9.092290E-320, L1_SIZE = 82969
-n = 3111
-The input size is 3105
-Average elapsed time: 0.00661277 ms
+mm2-fast result on part of the 10k_100m (single thread):
+[22181 entries] lookup time: 1.393 ms -> mm2-fast
+
+our result:
+L0_PARAMETER0 = -1.589081E-02, L0_PARAMETER1 = 4.181793E-04, L1_SIZE = 448591
+n = 14354939
+The input size is 22181
+Average elapsed time: 0.0457307 ms
 The solution is correct
 ```
 After running the test, the human readable output will also be saved in the `test` folder, which can be manually compared with the mm2-fast output.  
