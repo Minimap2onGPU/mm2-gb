@@ -174,6 +174,8 @@ The input size is 22181
 Average elapsed time: 0.0457307 ms
 The solution is correct
 ```
+__Shows about 31x speedup__
+
 After running the test, the human readable output will also be saved in the `test` folder, which can be manually compared with the mm2-fast output.  
 The output files include:
 - `lisa_pos_<implementation>_result.dat`
